@@ -1,0 +1,28 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(80, 24, &ui)"
+---
+┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 9,412 m ── CARRIER 03 ┐
+│┌ HELP ──────────────────────────────────────────────────────────────────────┐│
+││                                                                            ││
+││GLOSSARY                                                                    ││
+││  Echo         This run's spendable currency; generators produce it.        ││
+││  Rate         Echo/s from generators, tiers, upgrades and hulls.           ││
+││  Peak         Highest Echo balance this run; Descent checks it.            ││
+││  Pulse        SPACE converts 10 s of current production into Echo.         ││
+││  Carrier      The repeating frequency band K-9 is receiving.               ││
+││  Tune         f selects a band; matching the carrier is worth ×1.5.        ││
+││  Generator    A producer bought with Echo; costs rise per unit.            ││
+││  Signal Chain One-time upgrades bought with Echo; reset by Descent.        ││
+││  Descent      Reset at 1.00M Peak to earn Fathoms and sink 500 m.          ││
+││  Fathom       Permanent currency from Descent; buys hulls.                 ││
+││  Hull         A permanent upgrade bought with Fathoms.                     ││
+││  Automation   Hull-driven actions that run while you do not.               ││
+││  Offline      Away time runs at full rate, capped by hull upgrades.        ││
+││  Achievement  A one-time milestone worth a permanent +1% output.           ││
+││                                                                            ││
+││VERSION                                                                     ││
+││  HADAL v0.1.1                                                              ││
+││Up/Down scroll   PgUp/PgDn page   Esc close                                 ││
+│└────────────────────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────────────┘

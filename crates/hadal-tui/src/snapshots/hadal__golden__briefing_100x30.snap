@@ -1,0 +1,34 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(100, 30, &ui)"
+---
+┌ HADAL ── RELAY K-9 ─────────────────────────────────────────────────────────────────── FIRST RUN ┐
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│           ┌ BRIEFING ────────────────────────────────────────────────────────────────┐           │
+│           │OPERATOR 7 // RELAY K-9 // 7,912 M                                        │           │
+│           │                                                                          │           │
+│           │The station is dead. The trench is not.                                   │           │
+│           │A carrier repeats on the hydrophones, and it is                           │           │
+│           │getting clearer as K-9 sinks.                                             │           │
+│           │                                                                          │           │
+│           │YOUR FIRST HOUR                                                           │           │
+│           │  SPACE  pulse the capacitor: one pulse wakes 10 s of Echo                │           │
+│           │  h      buy a Hydrophone (10 Echo): it listens while you do not          │           │
+│           │  f      tune to the carrier band: a match is worth ×1.5                  │           │
+│           │  2      DESCENT at 1.00M Peak Echo: earn Fathoms, buy permanent hulls    │           │
+│           │                                                                          │           │
+│           │Echo is this run's currency. Fathoms are forever.                         │           │
+│           │Every Descent sinks K-9 another 500 m and starts again, louder.           │           │
+│           │                                                                          │           │
+│           │[?] full briefing  [any key] begin                                        │           │
+│           └──────────────────────────────────────────────────────────────────────────┘           │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘

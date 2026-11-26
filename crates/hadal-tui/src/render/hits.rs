@@ -36,6 +36,10 @@ pub struct HitMap {
     pub archive_total: usize,
     /// Visible ARCHIVE content rows (for scroll clamping).
     pub archive_visible: usize,
+    /// Total HELP document rows (for scroll clamping).
+    pub help_total: usize,
+    /// Visible HELP document rows (for scroll clamping).
+    pub help_visible: usize,
 }
 
 fn contains(rect: Rect, x: u16, y: u16) -> bool {

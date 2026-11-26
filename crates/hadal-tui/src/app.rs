@@ -358,6 +358,11 @@ pub struct Session {
     archive_visible: usize,
     edit: Option<EditState>,
     help: bool,
+    briefing: bool,
+    help_scroll: usize,
+    help_total: usize,
+    help_visible: usize,
+    hovered_generator: Option<GeneratorId>,
     last_save_unix: Option<u64>,
     last_hull_click: Option<(usize, Instant)>,
     bell_once: bool,
@@ -419,6 +424,11 @@ impl Session {
                 archive_visible: 0,
                 edit: None,
                 help: false,
+                briefing: true,
+                help_scroll: 0,
+                help_total: 0,
+                help_visible: 0,
+                hovered_generator: None,
                 last_save_unix: None,
                 last_hull_click: None,
                 bell_once: false,
@@ -488,6 +498,11 @@ impl Session {
             archive_visible: 0,
             edit: None,
             help: false,
+            briefing: false,
+            help_scroll: 0,
+            help_total: 0,
+            help_visible: 0,
+            hovered_generator: None,
             last_save_unix: None,
             last_hull_click: None,
             bell_once: false,
@@ -512,6 +527,7 @@ impl Session {
             session.boot = Boot::New {
                 started: Instant::now(),
             };
+            session.briefing = true;
         }
 
         session.save_now(now_unix);
@@ -542,6 +558,9 @@ impl Session {
                 },
                 Boot::Done => Screen::Sonar,
             };
+        }
+        if self.briefing {
+            return Screen::Briefing;
         }
         match self.current {
             ScreenKind::Sonar => Screen::Sonar,
@@ -585,11 +604,6 @@ impl Session {
     /// Skip the boot sequence.
     pub fn skip_boot(&mut self) {
         self.boot = Boot::Done;
-    }
-
-    /// Close the help overlay.
-    pub fn close_help(&mut self) {
-        self.help = false;
     }
 
     fn settings_view(&self) -> SettingsView {
@@ -685,6 +699,9 @@ impl Session {
             }
             Command::Help => {
                 self.help = !self.help;
+                if self.help {
+                    self.help_scroll = 0;
+                }
             }
             Command::PageUp => self.page(-1),
             Command::PageDown => self.page(1),
@@ -754,6 +771,7 @@ impl Session {
         }
         self.confirm_descent = false;
         self.notice = None;
+        self.hovered_generator = None;
     }
 
     fn cycle_tab(&mut self, direction: isize) {
@@ -797,6 +815,10 @@ impl Session {
     }
 
     fn previous(&mut self) {
+        if self.help {
+            self.scroll_help(-1);
+            return;
+        }
         match self.current {
             ScreenKind::Archive => self.scroll_archive(-1),
             ScreenKind::System => self.move_system_focus(-1),
@@ -805,6 +827,10 @@ impl Session {
     }
 
     fn next(&mut self) {
+        if self.help {
+            self.scroll_help(1);
+            return;
+        }
         match self.current {
             ScreenKind::Archive => self.scroll_archive(1),
             ScreenKind::System => self.move_system_focus(1),
@@ -813,6 +839,11 @@ impl Session {
     }
 
     fn page(&mut self, direction: isize) {
+        if self.help {
+            let page = self.help_visible.saturating_sub(1).max(1) as isize;
+            self.scroll_help(direction * page);
+            return;
+        }
         match self.current {
             ScreenKind::Archive => {
                 let page = self.archive_visible.saturating_sub(1).max(1) as isize;
@@ -821,6 +852,11 @@ impl Session {
             ScreenKind::System => self.move_system_focus(direction * 5),
             _ => {}
         }
+    }
+
+    fn scroll_help(&mut self, delta: isize) {
+        let max = self.help_total.saturating_sub(self.help_visible);
+        self.help_scroll = (self.help_scroll as isize + delta).clamp(0, max as isize) as usize;
     }
 
     fn scroll_archive(&mut self, delta: isize) {
@@ -1317,8 +1353,10 @@ impl Session {
                 self.offline_visible = false;
                 self.archive_scroll = 0;
                 self.notice = None;
+                self.hovered_generator = None;
                 self.last_save_unix = Some(now_unix);
                 self.save_error = None;
+                self.briefing = false;
                 Ok(())
             }
             Err(err) => Err(err.to_string()),
@@ -1359,10 +1397,12 @@ impl Session {
         self.offline_visible = false;
         self.archive_scroll = 0;
         self.notice = None;
+        self.hovered_generator = None;
         self.help = false;
         self.anim = AnimState::new(self.engine.view().echo());
         self.last_save_unix = None;
         self.boot = Boot::New { started: now };
+        self.briefing = true;
         self.save_now(now_unix);
         Ok(())
     }
@@ -1485,8 +1525,25 @@ impl App {
                 } else if !self.session.boot_done(now) {
                     self.session.skip_boot();
                     self.dirty = true;
+                } else if self.session.briefing {
+                    if key.code == KeyCode::Char('?') {
+                        self.session.briefing = false;
+                        self.session.help = true;
+                        self.session.help_scroll = 0;
+                    } else {
+                        self.session.briefing = false;
+                    }
+                    self.dirty = true;
                 } else if self.session.help {
-                    self.session.close_help();
+                    let page = self.session.help_visible.saturating_sub(1).max(1) as isize;
+                    match key.code {
+                        KeyCode::Esc => self.session.help = false,
+                        KeyCode::Up => self.session.scroll_help(-1),
+                        KeyCode::Down => self.session.scroll_help(1),
+                        KeyCode::PageUp => self.session.scroll_help(-page),
+                        KeyCode::PageDown => self.session.scroll_help(page),
+                        _ => {}
+                    }
                     self.dirty = true;
                 } else if self.session.edit.is_some() {
                     self.session.edit_key(key, now_unix());
@@ -1506,7 +1563,23 @@ impl App {
                 }
             }
             CrosstermEvent::Mouse(mouse) => {
-                if self.session.boot_done(now)
+                if mouse.kind == MouseEventKind::Moved {
+                    if self.session.mouse
+                        && self.session.boot_done(now)
+                        && self.session.dive.is_none()
+                        && !self.session.help
+                        && !self.session.briefing
+                        && self.session.edit.is_none()
+                        && !self.session.confirm_descent
+                        && !self.session.offline_visible
+                    {
+                        let hovered = self.session.hit_map.generator_at(mouse.column, mouse.row);
+                        if hovered != self.session.hovered_generator {
+                            self.session.hovered_generator = hovered;
+                            self.dirty = true;
+                        }
+                    }
+                } else if self.session.boot_done(now)
                     && self.session.dive.is_none()
                     && !self.session.help
                     && self.session.edit.is_none()
@@ -1671,10 +1744,22 @@ impl App {
                 now_unix: now_secs,
                 edit,
                 help: self.session.help,
+                help_scroll: self.session.help_scroll,
+                demo: self.session.demo,
+                hovered: self.session.hovered_generator,
             };
             terminal.draw(|frame| {
                 hits = render(frame, &ui);
             })?;
+        }
+        if self.session.help {
+            self.session.help_total = hits.help_total;
+            self.session.help_visible = hits.help_visible;
+            self.session.help_scroll = self.session.help_scroll.min(
+                self.session
+                    .help_total
+                    .saturating_sub(self.session.help_visible),
+            );
         }
         if self.session.current == ScreenKind::Archive && hits.archive_total > 0 {
             self.session.archive_total = hits.archive_total;
@@ -1806,6 +1891,11 @@ mod tests {
             archive_visible: 0,
             edit: None,
             help: false,
+            briefing: false,
+            help_scroll: 0,
+            help_total: 0,
+            help_visible: 0,
+            hovered_generator: None,
             last_save_unix: None,
             last_hull_click: None,
             bell_once: false,
@@ -1836,7 +1926,7 @@ mod tests {
         assert!(session.save_now(2_000));
         assert!(!SavePaths::new(dir.path()).save().exists());
         assert_eq!(session.engine.view().hull_count(), 15);
-        assert_eq!(session.screen(Instant::now()), Screen::Sonar);
+        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
         let _ = session.apply_command(Command::Pulse, 2_000);
     }
 
@@ -2308,7 +2398,7 @@ mod tests {
         let mut session = headless(Engine::new(), dir.path().to_path_buf(), None);
         assert!(session.apply_command(Command::Help, 1_000));
         assert!(session.help);
-        session.close_help();
+        assert!(session.apply_command(Command::Cancel, 1_000));
         assert!(!session.help);
     }
 
@@ -2448,9 +2538,12 @@ mod tests {
         assert!(h.text().contains("RELAY K-9"), "boot frame: {}", h.text());
         h.key(KeyCode::Char('x'));
         assert!(h.app.session.boot_done(h.now));
+        assert!(matches!(h.app.session.screen(h.now), Screen::Briefing));
+        h.key(KeyCode::Char('x'));
+        assert!(!h.app.session.briefing);
         h.render();
         assert!(h.text().contains("SONAR"), "sonar frame: {}", h.text());
-        eprintln!("step 0: boot skipped");
+        eprintln!("step 0: boot skipped, briefing dismissed");
 
         // Pulse.
         h.key(KeyCode::Char(' '));
@@ -2898,6 +2991,159 @@ mod tests {
         );
     }
 
+    fn draw_engine(engine: &Engine) -> String {
+        let anim = Anim::settled(engine.view().echo());
+        let ui = UiState::settled(
+            engine.view(),
+            Palette::resolve(Theme::Abyss, ColorDepth::Auto),
+            false,
+            Screen::Sonar,
+            &anim,
+        );
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let _ = render(frame, &ui);
+            })
+            .expect("draw");
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn sonar_objective_line_three_states() {
+        let no_hydro = demo_with(|value| {
+            value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
+            value["run"]["generators"] = serde_json::json!([0, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+        });
+        assert!(
+            draw_engine(&no_hydro).contains("pulse until you can afford a Hydrophone"),
+            "no-hydro objective"
+        );
+
+        let mismatch = demo_with(|value| {
+            value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
+            value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+            value["run"]["carrier_band"] = serde_json::json!(2);
+            value["run"]["tuned_band"] = serde_json::json!(0);
+        });
+        assert!(
+            draw_engine(&mismatch).contains("tune to CARRIER 03"),
+            "mismatch objective"
+        );
+
+        let descend = demo_with(|value| {
+            value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
+            value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!(["impedance_match"]);
+            value["run"]["carrier_band"] = serde_json::json!(0);
+            value["run"]["tuned_band"] = serde_json::json!(0);
+            value["run"]["peak_echo"] = serde_json::json!("5000000");
+        });
+        assert!(
+            draw_engine(&descend).contains("2 > p > y"),
+            "descent-available objective"
+        );
+    }
+
+    #[test]
+    fn briefing_shows_for_new_save_and_demo_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let mut fresh = Session::start(&opts, 1_000).expect("fresh");
+        assert!(fresh.briefing);
+        fresh.skip_boot();
+        assert_eq!(fresh.screen(Instant::now()), Screen::Briefing);
+        drop(fresh);
+
+        let mut loaded = Session::start(&opts, 1_001).expect("loaded");
+        assert!(!loaded.briefing);
+        loaded.skip_boot();
+        assert_eq!(loaded.screen(Instant::now()), Screen::Sonar);
+        drop(loaded);
+
+        let mut demo_opts = opts.clone();
+        demo_opts.demo = true;
+        let demo = Session::start(&demo_opts, 1_002).expect("demo");
+        assert!(demo.briefing);
+        assert_eq!(demo.screen(Instant::now()), Screen::Briefing);
+    }
+
+    #[test]
+    fn briefing_any_key_dismisses_and_question_opens_help() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let session = Session::start(&opts, 1_000).expect("fresh");
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x')); // skip boot
+        assert!(h.app.session.briefing);
+        h.render();
+        let text = h.text();
+        assert!(
+            text.contains("OPERATOR 7 // RELAY K-9 // 7,912 M"),
+            "{text}"
+        );
+        assert!(text.contains("The station is dead. The trench is not."));
+        h.key(KeyCode::Char('x'));
+        assert!(!h.app.session.briefing);
+        h.render();
+        assert!(h.text().contains("SONAR"));
+        drop(h);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let session = Session::start(&opts, 1_000).expect("fresh");
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        assert!(h.app.session.briefing);
+        h.key(KeyCode::Char('?'));
+        assert!(!h.app.session.briefing);
+        assert!(h.app.session.help);
+        h.render();
+        assert!(h.text().contains("BASICS"));
+        h.key(KeyCode::Esc);
+        assert!(!h.app.session.help);
+        h.render();
+        assert!(h.text().contains("SONAR"));
+    }
+
+    #[test]
+    fn help_scroll_clamps_both_ends() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut session = headless(Engine::new(), dir.path().to_path_buf(), None);
+        session.help = true;
+        let start = Instant::now();
+        let mut app = App::new_at(session, start);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        app.render(&mut terminal, start).expect("render");
+        let total = app.session.help_total;
+        let visible = app.session.help_visible;
+        assert!(total > visible);
+
+        for _ in 0..50 {
+            app.session.apply_command(Command::PageDown, 1_000);
+        }
+        assert_eq!(app.session.help_scroll, total - visible);
+        for _ in 0..100 {
+            app.session.apply_command(Command::FocusPrev, 1_000);
+        }
+        assert_eq!(app.session.help_scroll, 0);
+        for _ in 0..50 {
+            app.session.apply_command(Command::PageDown, 1_000);
+        }
+        assert_eq!(app.session.help_scroll, total - visible);
+    }
+
     #[test]
     fn unknown_config_fields_are_ignored() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2937,6 +3183,7 @@ mod tests {
         let start = Instant::now();
         let session = Session::start(&opts, 1_000).expect("fresh");
         let mut first = Harness::new(App::new_at(session, start), start);
+        first.key(KeyCode::Char('x'));
         first.key(KeyCode::Char('x'));
         first.key(KeyCode::Char('4'));
         for _ in 0..7 {
@@ -3000,6 +3247,7 @@ mod tests {
         // Save at the real clock so the reload is not a huge offline gap.
         let session = Session::start(&opts, now_unix()).expect("start");
         let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
         h.key(KeyCode::Char('x'));
         h.key(KeyCode::Char('4'));
         for _ in 0..4 {

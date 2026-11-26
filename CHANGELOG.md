@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-11-26
+
+### Added
+
+- **First-run briefing** — a one-panel onboarding shown after boot for a new save, and always
+  with `--demo`; it is derived from state and has no saved "seen" flag.
+- **Scrollable in-game help** — `?` opens a briefing with BASICS → WHAT TO DO NOW → CONTROLS
+  → DESCENT & FATHOMS → OFFLINE → NUMBERS → GLOSSARY → VERSION, including a 14-term glossary.
+- **Always-on objective line** — SONAR shows one next action with its reason (pulse →
+  affordable Hydrophone → Impedance Match → tune → reach 1.00M → descend → nearest hull).
+- **Panel and selection explainers** — panels describe their contents at ≥100×30; a focused
+  or hovered generator, upgrade or hull shows a plain-words effect and its exact cost.
+- **Honest demo banner** — `--demo` shows a persistent `DEMO // NOTHING IS SAVED` banner and a
+  demo briefing.
+
+### Fixed
+
+- Modal overlays no longer leave screen separators visible at the frame edge (the overlay
+  band behind the popup is cleared).
+
 ## [0.1.0] - 2026-11-26
 
 M1 vertical slice: a headless deterministic core, a full terminal client, a pacing

@@ -11,8 +11,8 @@ use ratatui::widgets::Paragraph;
 use crate::glyphs::{self, Glyphs};
 use crate::model;
 use crate::render::{
-    Focus, HitMap, UiState, amount, bar, cost, count, rate_text, render_rule, render_tabs,
-    titled_frame, window_start,
+    Focus, HitMap, UiState, amount, bar, cost, count, rate_text, render_rule, render_selection,
+    render_tabs, selection_line, titled_frame, window_start,
 };
 use crate::theme::Palette;
 
@@ -86,11 +86,16 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         &p,
         ui.screen.tab(),
     );
-    let content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
+    let mut content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
     let mut hits = HitMap {
         tabs,
         ..HitMap::default()
     };
+    if ui.demo && content.height >= 2 {
+        let banner = Rect::new(content.x, content.y, content.width, 2);
+        render_demo_banner(frame, banner, ui);
+        content = Rect::new(content.x, content.y + 2, content.width, content.height - 2);
+    }
     if area.width >= 100 && area.height >= 30 {
         render_wide(frame, content, ui, g, &mut hits);
     } else {
@@ -104,20 +109,22 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
 // ---------------------------------------------------------------------
 
 fn render_narrow(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
+    let selection = if selection_line(ui).is_some() { 1 } else { 0 };
     let rows = Layout::vertical([
-        Constraint::Length(3), // resource band
-        Constraint::Length(1), // rule
-        Constraint::Length(3), // scope
-        Constraint::Length(1), // capacitor
-        Constraint::Length(1), // carrier
-        Constraint::Length(1), // generator header
-        Constraint::Length(4), // generators
-        Constraint::Length(1), // hint
-        Constraint::Min(0),    // signal chain
-        Constraint::Length(1), // rule
-        Constraint::Length(1), // footer
+        Constraint::Length(3),         // resource band
+        Constraint::Length(1),         // rule
+        Constraint::Length(3),         // scope
+        Constraint::Length(1),         // capacitor
+        Constraint::Length(1),         // carrier
+        Constraint::Length(1),         // generator header
+        Constraint::Length(4),         // generators
+        Constraint::Length(1),         // objective
+        Constraint::Length(selection), // selection explainer
+        Constraint::Min(0),            // signal chain
+        Constraint::Length(1),         // rule
+        Constraint::Length(1),         // footer
     ])
-    .areas::<11>(inner);
+    .areas::<12>(inner);
 
     render_band(frame, rows[0], ui, g);
     render_rule(frame, rows[1], &ui.palette, g);
@@ -127,21 +134,24 @@ fn render_narrow(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, h
     render_generator_header(frame, rows[5], &ui.palette);
     render_generators(frame, rows[6], ui, hits);
     render_hint(frame, rows[7], ui, g);
-    render_chain(frame, rows[8], ui, g, hits);
-    render_rule(frame, rows[9], &ui.palette, g);
-    render_footer(frame, rows[10], &ui.palette);
+    render_selection(frame, rows[8], ui);
+    render_chain(frame, rows[9], ui, g, hits, false);
+    render_rule(frame, rows[10], &ui.palette, g);
+    render_footer(frame, rows[11], &ui.palette);
 }
 
 fn render_wide(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
+    let selection = if selection_line(ui).is_some() { 1 } else { 0 };
     let rows = Layout::vertical([
-        Constraint::Length(3), // resource band
-        Constraint::Length(1), // rule
-        Constraint::Min(0),    // body
-        Constraint::Length(1), // hint
-        Constraint::Length(1), // rule
-        Constraint::Length(1), // footer
+        Constraint::Length(3),         // resource band
+        Constraint::Length(1),         // rule
+        Constraint::Min(0),            // body
+        Constraint::Length(selection), // selection explainer
+        Constraint::Length(1),         // objective
+        Constraint::Length(1),         // rule
+        Constraint::Length(1),         // footer
     ])
-    .areas::<6>(inner);
+    .areas::<7>(inner);
 
     render_band(frame, rows[0], ui, g);
     render_rule(frame, rows[1], &ui.palette, g);
@@ -164,23 +174,81 @@ fn render_wide(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hit
         Constraint::Length(1), // capacitor
         Constraint::Length(1), // carrier
         Constraint::Length(1), // generator header
+        Constraint::Length(1), // generator caption
         Constraint::Length(4), // generators
     ])
-    .areas::<5>(left);
+    .areas::<6>(left);
     render_scope(frame, left_rows[0], ui, g);
     render_capacitor(frame, left_rows[1], ui, g);
     render_carrier(frame, left_rows[2], ui);
     render_generator_header(frame, left_rows[3], &ui.palette);
-    render_generators(frame, left_rows[4], ui, hits);
+    render_caption(
+        frame,
+        left_rows[4],
+        "   Costs rise with each unit.",
+        &ui.palette,
+    );
+    render_generators(frame, left_rows[5], ui, hits);
 
     let right_rows =
         Layout::vertical([Constraint::Min(0), Constraint::Length(11)]).areas::<2>(right);
-    render_chain(frame, right_rows[0], ui, g, hits);
+    render_chain(frame, right_rows[0], ui, g, hits, true);
     render_station(frame, right_rows[1], ui);
 
-    render_hint(frame, rows[3], ui, g);
-    render_rule(frame, rows[4], &ui.palette, g);
-    render_footer(frame, rows[5], &ui.palette);
+    render_selection(frame, rows[3], ui);
+    render_hint(frame, rows[4], ui, g);
+    render_rule(frame, rows[5], &ui.palette, g);
+    render_footer(frame, rows[6], &ui.palette);
+}
+
+fn render_demo_banner(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    if area.height < 2 || area.width == 0 {
+        return;
+    }
+    let p = ui.palette;
+    let rows = Layout::vertical([Constraint::Length(1); 2]).areas::<2>(area);
+    let descents = ui.view.descents();
+    let hulls = ui.view.hull_count();
+    let compact = area.width < 90;
+    let first = if compact {
+        format!("DEMO // NOTHING IS SAVED   late game: {descents} descents, {hulls} hulls")
+    } else {
+        format!(
+            "DEMO // NOTHING IS SAVED   late game: {descents} descents, {hulls} hulls, automation is on"
+        )
+    };
+    let second = if compact {
+        "automation is on; keys additive   ? briefing   1-4 screens"
+    } else {
+        "the station plays itself; keys are additive   ? briefing   1-4 screens"
+    };
+    let prefix = "DEMO // NOTHING IS SAVED";
+    let rest = first.strip_prefix(prefix).unwrap_or("");
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                prefix.to_owned(),
+                Style::new().fg(p.alert).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(rest.to_owned(), dim(p)),
+        ]))
+        .style(Style::new().bg(p.panel)),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(second, dim(p)))).style(Style::new().bg(p.panel)),
+        rows[1],
+    );
+}
+
+fn render_caption(frame: &mut Frame, area: Rect, text: &str, p: &Palette) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text.to_owned(), dim(*p)))),
+        area,
+    );
 }
 
 // ---------------------------------------------------------------------
@@ -638,7 +706,14 @@ fn render_generator(
 // Signal Chain
 // ---------------------------------------------------------------------
 
-fn render_chain(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
+fn render_chain(
+    frame: &mut Frame,
+    area: Rect,
+    ui: &UiState<'_>,
+    g: &Glyphs,
+    hits: &mut HitMap,
+    explainer: bool,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -659,8 +734,17 @@ fn render_chain(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs, hit
         ])),
         Rect::new(area.x, area.y, area.width, 1),
     );
+    let header = if explainer { 2 } else { 1 };
+    if explainer && area.height >= 2 {
+        render_caption(
+            frame,
+            Rect::new(area.x, area.y + 1, area.width, 1),
+            "   One-time this run; Descent resets them.",
+            &p,
+        );
+    }
 
-    let visible = area.height.saturating_sub(1) as usize;
+    let visible = area.height.saturating_sub(header) as usize;
     if visible == 0 {
         return;
     }
@@ -670,7 +754,7 @@ fn render_chain(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs, hit
     };
     let start = window_start(UpgradeId::ALL.len(), visible, focus);
     for (offset, index) in (start..UpgradeId::ALL.len()).take(visible).enumerate() {
-        let rect = Rect::new(area.x, area.y + 1 + offset as u16, area.width, 1);
+        let rect = Rect::new(area.x, area.y + header + offset as u16, area.width, 1);
         hits.upgrades.push((rect, index));
         render_upgrade_row(frame, rect, index, ui);
     }
@@ -788,13 +872,11 @@ fn kv(label: &str, value: String, p: P) -> Line<'static> {
 
 fn render_hint(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
     let p = ui.palette;
-    let Some(hint) = model::tutorial_hint(ui.view) else {
-        return;
-    };
+    let hint = model::objective_line(ui.view, ui.ascii);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(format!("{} ", g.chevron_right), amber(p)),
-            Span::styled(model::ascii_text(&hint, ui.ascii), text(p)),
+            Span::styled(hint, text(p)),
         ])),
         area,
     );

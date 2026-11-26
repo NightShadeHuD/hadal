@@ -5,11 +5,11 @@
 //! the session share one implementation of names, requirements, contributions,
 //! governor validation, bucket progress, and the tutorial hint.
 
-use hadal_core::Decimal;
 use hadal_core::StateView;
 use hadal_core::content::ids::{GeneratorId, HullId, UpgradeId};
 use hadal_core::content::tables::{self, Unlock, UpgradeEffect};
-use hadal_core::decimal::to_human_floor;
+use hadal_core::decimal::{to_human_ceil, to_human_floor};
+use hadal_core::{BuyQuantity, Decimal};
 
 /// What a Descent preserves (the reset half comes from `view.reset_scope()`).
 pub const PERSIST_SCOPE: &[&str] = &[
@@ -70,13 +70,9 @@ pub fn generator_count_name(id: GeneratorId, count: u32) -> &'static str {
     }
 }
 
-/// Echo/second produced by one generator tier, including tier + global
-/// multipliers. Mirrors the core `production_rate` term exactly.
-pub fn generator_contribution(view: StateView<'_>, id: GeneratorId) -> Decimal {
-    let owned = view.generator_owned(id);
-    if owned == 0 {
-        return Decimal::ZERO;
-    }
+/// Echo/second produced by one unit of a generator tier, including tier and
+/// global multipliers. Independent of how many units are owned.
+pub fn generator_unit_rate(view: StateView<'_>, id: GeneratorId) -> Decimal {
     let mut tier = Decimal::from_u64(1);
     let mut all = Decimal::from_u64(1);
     for upgrade in UpgradeId::ALL {
@@ -93,10 +89,19 @@ pub fn generator_contribution(view: StateView<'_>, id: GeneratorId) -> Decimal {
     }
     let def = tables::generator_def(id);
     dec_f64(def.base_rate)
-        .mul(Decimal::from_u64(u64::from(owned)))
         .mul(tier)
         .mul(all)
         .mul(view.global_multiplier())
+}
+
+/// Echo/second produced by all owned units of one generator tier.
+/// Mirrors the core `production_rate` term exactly.
+pub fn generator_contribution(view: StateView<'_>, id: GeneratorId) -> Decimal {
+    let owned = view.generator_owned(id);
+    if owned == 0 {
+        return Decimal::ZERO;
+    }
+    generator_unit_rate(view, id).mul(Decimal::from_u64(u64::from(owned)))
 }
 
 /// Requirement text for a generator's unlock, if any.
@@ -319,27 +324,110 @@ fn decimal_to_f64(value: Decimal) -> f64 {
     }
 }
 
-/// A short, derived, non-blocking tutorial line; `None` once all steps are done.
-pub fn tutorial_hint(view: StateView<'_>) -> Option<String> {
-    if view.pulses_manual() == 0 {
-        return Some("SPACE: pulse the capacitor to wake the hydrophones.".to_owned());
+/// One derived next action for SONAR and HELP.
+///
+/// The first matching precondition wins; there is never more than one action.
+pub fn objective_line(view: StateView<'_>, ascii: bool) -> String {
+    let mult = multiplier_glyph(ascii);
+    let hydrophone = GeneratorId::Hydrophone;
+    let hydrophone_cost = view.generator_cost(hydrophone, BuyQuantity::One);
+
+    if view.can_pulse() && view.pulses_manual() == 0 {
+        return "SPACE  pulse the capacitor. A pulse pays 10 s of production.".to_owned();
     }
-    if view.generator_owned(GeneratorId::Hydrophone) == 0 {
-        return Some("h: buy a Hydrophone with Echo.".to_owned());
+    if view.generator_owned(hydrophone) == 0 && view.echo() < hydrophone_cost {
+        return "SPACE  pulse until you can afford a Hydrophone (10 Echo).".to_owned();
     }
-    if view.upgrade_count() == 0 {
-        return Some("u: open the Signal Chain and buy an upgrade.".to_owned());
+    if view.generator_affordable(hydrophone, BuyQuantity::One) {
+        return "h  buy a Hydrophone. It produces while you do not.".to_owned();
     }
-    if view.bands_matched() == 0 {
-        return Some("f: tune to the carrier band for ×1.5 output.".to_owned());
+    if view.upgrade_count() == 0 && view.upgrade_affordable(UpgradeId::ImpedanceMatch) {
+        return format!("u  buy Impedance Match: all production {mult}2 this run.");
     }
+    if !view.carrier_matched() {
+        return format!(
+            "f  tune to CARRIER {:02}. A match is worth {mult}1.5.",
+            view.carrier_band() + 1
+        );
+    }
+    let progress = descent_progress(view);
     if !view.can_descend() {
-        return Some(format!(
-            "Reach {} peak Echo to descend.",
-            to_human_floor(view.next_bucket_threshold())
-        ));
+        let pct = (progress.fraction * 100.0).round() as u32;
+        return format!(
+            "2  DESCENT needs {} Peak Echo. You are at {pct}%.",
+            to_human_floor(progress.next)
+        );
     }
-    None
+    if view.can_descend() {
+        return format!(
+            "2 > p > y  descend for +{} Fathoms and reset the run.",
+            view.descent_gain()
+        );
+    }
+
+    let next_hull = flattened_hulls()
+        .into_iter()
+        .find(|id| !view.hull_owned(*id));
+    match next_hull {
+        Some(id) => format!(
+            "Next hull  {}: {} Fathoms.",
+            hull_name(id),
+            view.hull_cost(id)
+        ),
+        None => "All hulls owned. Keep descending for Era Fathoms.".to_owned(),
+    }
+}
+
+/// One dim line describing the focused Signal Chain row or hull.
+pub fn selection_line(
+    view: StateView<'_>,
+    focus: crate::render::Focus,
+    ascii: bool,
+) -> Option<String> {
+    match focus {
+        crate::render::Focus::Upgrade(index) => {
+            let id = *UpgradeId::ALL.get(index)?;
+            let effect = upgrade_effect_text(id, ascii);
+            let cost = crate::render::cost(view.upgrade_cost(id));
+            if view.upgrade_owned(id) {
+                Some(format!(
+                    "{}: {effect} this run; {cost} Echo (owned).",
+                    upgrade_name(id)
+                ))
+            } else {
+                Some(format!(
+                    "{}: {effect} this run; costs {cost} Echo.",
+                    upgrade_name(id)
+                ))
+            }
+        }
+        crate::render::Focus::Hull(index) => {
+            let id = *flattened_hulls().get(index)?;
+            let effect = hull_effect(id, ascii);
+            let effect = effect.trim_end_matches('.').to_owned();
+            let cost = view.hull_cost(id);
+            let unit = if cost == 1 { "Fathom" } else { "Fathoms" };
+            if view.hull_owned(id) {
+                Some(format!(
+                    "{}: {effect}; {cost} {unit} (owned).",
+                    hull_name(id)
+                ))
+            } else {
+                Some(format!("{}: {effect}; costs {cost} {unit}.", hull_name(id)))
+            }
+        }
+        _ => None,
+    }
+}
+
+/// One dim line describing a generator row.
+pub fn generator_selection(view: StateView<'_>, id: GeneratorId) -> String {
+    format!(
+        "{}: +{}/s each; next unit costs {} Echo.",
+        generator_name(id),
+        crate::render::rate_text(generator_unit_rate(view, id)),
+        to_human_ceil(view.generator_cost(id, BuyQuantity::One))
+    )
 }
 
 // ---------------------------------------------------------------------
@@ -521,57 +609,117 @@ mod tests {
     }
 
     #[test]
-    fn tutorial_steps_advance_and_disappear() {
-        let hint = |engine: &hadal_core::Engine| tutorial_hint(engine.view());
+    fn objective_line_priority_and_states() {
+        let line = |engine: &hadal_core::Engine| objective_line(engine.view(), false);
 
-        assert!(
-            hint(&hadal_core::Engine::new())
-                .expect("pulse hint")
-                .contains("pulse")
-        );
+        // 1. A fresh full capacitor asks for the first pulse.
+        assert!(line(&hadal_core::Engine::new()).contains("pulse the capacitor"));
 
+        // 2. No Hydrophone and too little Echo: keep pulsing.
         let engine = engine_with(|value| {
             value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
+            value["run"]["generators"] = serde_json::json!([0, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+        });
+        assert!(line(&engine).contains("pulse until you can afford a Hydrophone"));
+
+        // 3. Affordability arrives.
+        let engine = engine_with(|value| {
+            value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("10");
+            value["run"]["generators"] = serde_json::json!([0, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+        });
+        assert!(line(&engine).contains("buy a Hydrophone"));
+
+        // 4. Impedance Match is affordable before the carrier.
+        let engine = engine_with(|value| {
+            value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("100");
+            value["run"]["generators"] = serde_json::json!([20, 1, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
         });
         assert!(
-            hint(&engine)
-                .expect("hydrophone hint")
-                .contains("Hydrophone")
+            line(&engine).contains("buy Impedance Match"),
+            "{}",
+            line(&engine)
         );
 
+        // 5. Carrier mismatch.
         let engine = engine_with(|value| {
             value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
             value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+            value["run"]["carrier_band"] = serde_json::json!(2);
+            value["run"]["tuned_band"] = serde_json::json!(0);
         });
-        assert!(
-            hint(&engine)
-                .expect("upgrade hint")
-                .contains("Signal Chain")
-        );
+        let mismatch = line(&engine);
+        assert!(mismatch.contains("tune to CARRIER 03"), "{mismatch}");
+        assert!(mismatch.contains("1.5"));
 
+        // 6. Peak below threshold.
         let engine = engine_with(|value| {
             value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
             value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
-            value["run"]["upgrades"] = serde_json::json!(["impedance_match"]);
-        });
-        assert!(hint(&engine).expect("tune hint").contains("tune"));
-
-        let engine = engine_with(|value| {
-            value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
-            value["meta"]["stats"]["bands_matched"] = serde_json::json!(1);
-            value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
-            value["run"]["upgrades"] = serde_json::json!(["impedance_match"]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+            value["run"]["carrier_band"] = serde_json::json!(0);
+            value["run"]["tuned_band"] = serde_json::json!(0);
             value["run"]["peak_echo"] = serde_json::json!("0");
         });
-        assert!(hint(&engine).expect("threshold hint").contains("Reach"));
+        let peak = line(&engine);
+        assert!(peak.contains("DESCENT needs 1.00M Peak Echo"), "{peak}");
+        assert!(peak.contains("You are at 0%"));
 
+        // 7. Descent available.
         let engine = engine_with(|value| {
             value["meta"]["stats"]["pulses_manual"] = serde_json::json!(1);
-            value["meta"]["stats"]["bands_matched"] = serde_json::json!(1);
+            value["run"]["charge_ticks"] = serde_json::json!(0);
+            value["run"]["echo"] = serde_json::json!("0");
             value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
             value["run"]["upgrades"] = serde_json::json!(["impedance_match"]);
-            value["run"]["peak_echo"] = serde_json::json!("1000000");
+            value["run"]["carrier_band"] = serde_json::json!(0);
+            value["run"]["tuned_band"] = serde_json::json!(0);
+            value["run"]["peak_echo"] = serde_json::json!("5000000");
         });
-        assert!(hint(&engine).is_none(), "hint disappears at the threshold");
+        let descent = line(&engine);
+        assert!(descent.starts_with("2 > p > y"), "{descent}");
+        assert!(descent.contains("descend for +"), "{descent}");
+
+        // ASCII multiplier variant.
+        let ascii = objective_line(engine.view(), true);
+        assert!(ascii.contains("x1.5") || ascii.contains("descend"));
+    }
+
+    #[test]
+    fn selection_lines_name_cost_and_effect() {
+        let engine = hadal_core::Engine::new();
+        let generator = generator_selection(engine.view(), GeneratorId::Hydrophone);
+        assert_eq!(
+            generator,
+            "Hydrophone: +0.75/s each; next unit costs 10 Echo."
+        );
+
+        let engine = engine_with(|value| {
+            value["run"]["generators"] = serde_json::json!([1, 0, 0, 0]);
+            value["run"]["upgrades"] = serde_json::json!([]);
+            value["run"]["echo"] = serde_json::json!("0");
+        });
+        let upgrade = selection_line(engine.view(), crate::render::Focus::Upgrade(0), false)
+            .expect("upgrade line");
+        assert!(upgrade.contains("Impedance Match"));
+        assert!(upgrade.contains("×2"));
+
+        let hull =
+            selection_line(engine.view(), crate::render::Focus::Hull(0), false).expect("hull line");
+        assert!(hull.contains("Auto-Pulse"));
+        assert!(hull.contains("1 Fathom"));
     }
 }

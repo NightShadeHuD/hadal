@@ -139,6 +139,57 @@ fn boot_100x30() {
 }
 
 #[test]
+fn briefing_80x24_unicode() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Briefing, false);
+    insta::assert_snapshot!("briefing_80x24_unicode", draw(80, 24, &ui));
+}
+
+#[test]
+fn briefing_80x24_ascii() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Briefing, true);
+    insta::assert_snapshot!("briefing_80x24_ascii", draw(80, 24, &ui));
+}
+
+#[test]
+fn briefing_100x30() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Briefing, false);
+    insta::assert_snapshot!("briefing_100x30", draw(100, 30, &ui));
+}
+
+#[test]
+fn demo_banner_100x30() {
+    let fixture = Fixture::new(Engine::demo());
+    let mut ui = fixture.ui(Screen::Sonar, false);
+    ui.demo = true;
+    insta::assert_snapshot!("demo_banner_100x30", draw(100, 30, &ui));
+}
+
+#[test]
+fn demo_briefing_and_banner_fit_80x24() {
+    let fixture = Fixture::new(Engine::demo());
+    let mut briefing = fixture.ui(Screen::Briefing, false);
+    briefing.demo = true;
+    let text = draw(80, 24, &briefing);
+    assert!(text.contains("DEMO // NOTHING IS SAVED"), "{text}");
+    assert!(
+        text.contains("late game: 12 descents, 15 hulls, automation is on"),
+        "{text}"
+    );
+    assert!(text.contains("the station plays itself; keys are additive"));
+    assert!(text.contains("[any key] begin"), "footer clipped: {text}");
+
+    let mut sonar = fixture.ui(Screen::Sonar, false);
+    sonar.demo = true;
+    let text = draw(80, 24, &sonar);
+    assert!(text.contains("DEMO // NOTHING IS SAVED"), "{text}");
+    assert!(text.contains("automation is on; keys additive"), "{text}");
+    assert!(text.contains("? briefing   1-4 screens"), "{text}");
+}
+
+#[test]
 fn descent_80x24() {
     let fixture = Fixture::new(Engine::demo());
     let mut ui = fixture.ui(Screen::Descent, false);
@@ -252,6 +303,19 @@ fn help_80x24() {
 }
 
 #[test]
+fn help_glossary_80x24() {
+    let fixture = Fixture::new(Engine::demo());
+    let mut ui = fixture.ui(Screen::Sonar, false);
+    ui.help = true;
+    let index = crate::render::help::help_lines(&ui)
+        .iter()
+        .position(|line| line.to_string().contains("GLOSSARY"))
+        .expect("glossary section");
+    ui.help_scroll = index;
+    insta::assert_snapshot!("help_glossary_80x24", draw(80, 24, &ui));
+}
+
+#[test]
 fn import_80x24() {
     let fixture = Fixture::new(Engine::new());
     let mut ui = fixture.ui(Screen::System, false);
@@ -312,6 +376,32 @@ fn too_small_boundary() {
     assert!(too_small(Rect::new(0, 0, 79, 24)));
     assert!(too_small(Rect::new(0, 0, 80, 23)));
     assert!(!too_small(Rect::new(0, 0, MIN_WIDTH, MIN_HEIGHT)));
+}
+
+#[test]
+fn selection_explainer_covers_focus_and_hover() {
+    let engine = Engine::new();
+    let fixture = Fixture::new(engine);
+    let mut up = fixture.ui(Screen::Sonar, false);
+    up.focus = Focus::Upgrade(0);
+    let sonar = draw(80, 24, &up);
+    assert!(
+        sonar.contains("Impedance Match: all production ×2 this run"),
+        "{sonar}"
+    );
+    assert!(sonar.contains("costs 100 Echo"), "{sonar}");
+
+    let mut hull = fixture.ui(Screen::Descent, false);
+    hull.focus = Focus::Hull(0);
+    let descent = draw(80, 24, &hull);
+    assert!(descent.contains("Auto-Pulse:"), "{descent}");
+    assert!(descent.contains("costs 1 Fathom"), "{descent}");
+
+    let mut hover = fixture.ui(Screen::Sonar, false);
+    hover.hovered = Some(hadal_core::content::ids::GeneratorId::Hydrophone);
+    let sonar = draw(80, 24, &hover);
+    assert!(sonar.contains("Hydrophone: +0.75/s each"), "{sonar}");
+    assert!(sonar.contains("next unit costs 10 Echo"), "{sonar}");
 }
 
 #[test]
@@ -404,6 +494,31 @@ fn wording_defects_are_fixed() {
     let descent = draw(80, 24, &demo.ui(Screen::Descent, false));
     assert!(descent.contains("1F"), "{descent}");
     assert!(!descent.contains("1 F"), "{descent}");
+}
+
+#[test]
+fn confirm_descent_80x24() {
+    let fixture = Fixture::new(Engine::demo());
+    let mut ui = fixture.ui(Screen::Descent, false);
+    ui.focus = Focus::Hull(0);
+    ui.confirm_descent = true;
+    insta::assert_snapshot!("confirm_descent_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn offline_summary_80x24() {
+    let mut engine = Engine::demo();
+    let report = simulate_offline(&mut engine, 8 * 3600);
+    let anim = Anim::settled(engine.view().echo());
+    let mut ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &anim,
+    );
+    ui.offline = Some(&report);
+    insta::assert_snapshot!("offline_summary_80x24", draw(80, 24, &ui));
 }
 
 #[test]
@@ -571,6 +686,7 @@ fn ascii_mode_never_emits_non_ascii() {
         Screen::Boot {
             revealed: BOOT_LINES.len(),
         },
+        Screen::Briefing,
     ];
     for (width, height) in [(80u16, 24u16), (100, 30), (140, 40)] {
         for screen in screens {

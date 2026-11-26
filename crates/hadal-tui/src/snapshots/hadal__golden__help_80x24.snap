@@ -3,26 +3,26 @@ source: crates/hadal-tui/src/golden.rs
 expression: "draw(80, 24, &ui)"
 ---
 ┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 7,912 m ── CARRIER 01 ┐
-│[1┌ HELP ──────────────────────────────────────────────────────────────────┐  │
-│EC│CONTROLS                                                                │  │
-│  │GLOBAL   1-4 tabs  Tab cycle  ? help  Esc back  Ctrl+S save  q quit     │  │
-│RA│SONAR    Space pulse  f tune  h/H d/D m/M c/C buy  u chain              │  │
-├──│DESCENT  arrows focus  Enter buy  p then y descend  +/- governor        │──┤
-│SO│ARCHIVE  arrows scroll  PgUp/PgDn page                                  │  │
-│  │SYSTEM   arrows focus  Enter/Space change  t toggle                     │  │
-│  │         s save  e export  i import  R reset                            │  │
-│PU│                                                                        │  │
-│TU│OFFLINE                                                                 │  │
-│  │8 h base cap. Long Storage 24 h, Extended Ballast 72 h,                 │  │
-│h/│Abyssal Reservoir 168 h. Automation only, exact ticks, full rate.       │  │
-│d/│                                                                        │  │
-│m/│NUMBERS                                                                 │  │
-│c/│Amounts floor, costs ceil; affordability is exact.                      │  │
-│› │                                                                        │  │
-│SI│HADAL v0.1.0                                                            │  │
-│  │                                                                        │  │
-│  │ANY KEY CLOSES                                                          │  │
-│  │                                                                        │  │
-├──│                                                                        │──┤
-│SP└────────────────────────────────────────────────────────────────────────┘  │
+│┌ HELP ──────────────────────────────────────────────────────────────────────┐│
+││BASICS                                                                      ││
+││  Echo is this run's currency; generators produce it continuously.          ││
+││  SPACE pulses the capacitor: 10 s of production per full pulse.            ││
+││  h/H buy Hydrophones; d/D, m/M, c/C buy higher tiers.                      ││
+││  f tunes bands; matching the carrier is worth ×1.5.                        ││
+││  Descent at 1.00M Peak Echo turns the run into Fathoms.                    ││
+││                                                                            ││
+││WHAT TO DO NOW                                                              ││
+││  SPACE  pulse the capacitor. A pulse pays 10 s of production.              ││
+││                                                                            ││
+││CONTROLS                                                                    ││
+││  GLOBAL   1-4 tabs  Tab cycle  ? help  Esc back                            ││
+││           Ctrl+S save  q quit                                              ││
+││  SONAR    Space pulse  f tune  h/H d/D m/M c/C buy                         ││
+││           u chain  arrows focus  Enter buy                                 ││
+││  DESCENT  arrows focus  Enter buy  p then y descend                        ││
+││           +/- governor                                                     ││
+││  ARCHIVE  arrows scroll  PgUp/PgDn page                                    ││
+││  SYSTEM   arrows focus  Enter/Space change  t toggle                       ││
+││Up/Down scroll   PgUp/PgDn page   Esc close                                 ││
+│└────────────────────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────────────────┘

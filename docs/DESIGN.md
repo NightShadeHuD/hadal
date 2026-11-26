@@ -72,6 +72,21 @@ actions are one keystroke.
 `abyss` (default), `high-contrast`, `amber-crt`, `mono`. Colour is never the only carrier of
 state; matched bands and alerts also carry text labels.
 
+## Onboarding
+
+- **First-run briefing.** A one-panel briefing is shown after the boot sequence for a new
+  save, and always with `--demo`. It is derived from state — there is no saved "seen" flag —
+  so it never reappears once a save exists.
+- **Objective line.** SONAR shows one always-on next action with its reason: pulse when the
+  capacitor is full → buy an affordable Hydrophone → buy Impedance Match → tune when the
+  carrier changes → reach 1.00M Peak → descend → buy the nearest hull. It is derived and
+  single-action, never a checklist.
+- **Help.** `?` opens a scrollable briefing with BASICS → WHAT TO DO NOW → CONTROLS →
+  DESCENT & FATHOMS → OFFLINE → NUMBERS → GLOSSARY → VERSION, including a 14-term glossary.
+- **Copy tone.** Restrained, procedural, second person; no lore dumps, jokes or mascots.
+- **Demo honesty.** `--demo` is explicitly labelled with a persistent `DEMO // NOTHING IS
+  SAVED` banner and a demo briefing; it never saves or locks.
+
 ## Layer table
 
 | Layer | Verb | Currency | Reset wipes | Persists | New math |

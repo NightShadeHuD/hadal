@@ -36,8 +36,8 @@ expression: "draw(140, 40, &ui)"
 │  Abyssal Reservoir  350F OWNED  Offline cap 168 h.                                                                                       │
 │DESCENT                                                                                                                                   │
 │  Tidal Loop         200F OWNED  Fathom gain ×1.5.                                                                                        │
-│  Fractal Hull     50,000F NEED   Fathom gain ×2.                                                                                         │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Auto-Pulse: Fires a pulse whenever the capacitor is full; 1 Fathom (owned).                                                             │
 │BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000                                                                   │
 │                                                                                                                                          │
 │↑↓ focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar                                                                │

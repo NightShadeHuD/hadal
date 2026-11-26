@@ -14,7 +14,7 @@ use crate::glyphs::{self, Glyphs};
 use crate::model;
 use crate::render::{
     Focus, HitMap, UiState, amount, bar, cost, count, overlay_box, rate_text, render_rule,
-    render_tabs, titled_frame, window_start,
+    render_selection, render_tabs, selection_line, titled_frame, window_start,
 };
 use crate::theme::Palette;
 
@@ -78,24 +78,27 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     };
 
     let top_height = (content.height / 3).clamp(9, 10);
+    let selection = if selection_line(ui).is_some() { 1 } else { 0 };
     let rows = Layout::vertical([
         Constraint::Length(top_height),
-        Constraint::Length(1), // rule
-        Constraint::Min(0),    // hull tree
-        Constraint::Length(1), // rule
-        Constraint::Length(1), // governor
-        Constraint::Length(1), // notice
-        Constraint::Length(1), // footer
+        Constraint::Length(1),         // rule
+        Constraint::Min(0),            // hull tree
+        Constraint::Length(1),         // rule
+        Constraint::Length(selection), // selection explainer
+        Constraint::Length(1),         // governor
+        Constraint::Length(1),         // notice
+        Constraint::Length(1),         // footer
     ])
-    .areas::<7>(content);
+    .areas::<8>(content);
 
     render_top(frame, rows[0], ui, g);
     render_rule(frame, rows[1], &p, g);
     render_hull_tree(frame, rows[2], ui, g, &mut hits);
     render_rule(frame, rows[3], &p, g);
-    render_governor(frame, rows[4], ui);
-    render_notice(frame, rows[5], ui);
-    render_footer(frame, rows[6], &p, g);
+    render_selection(frame, rows[4], ui);
+    render_governor(frame, rows[5], ui);
+    render_notice(frame, rows[6], ui);
+    render_footer(frame, rows[7], &p, g);
 
     if ui.confirm_descent {
         render_confirmation(frame, ui);

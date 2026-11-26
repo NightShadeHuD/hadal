@@ -20,8 +20,8 @@ expression: "draw(80, 24, &ui)"
 │  Ballast Recall       2F OWNED  Start every run with 5 Hydrophones.          │
 │  Tuned Ballast        3F OWNED  Auto-tune to the carrier on every change.    │
 │  Auto-Buy I           5F OWNED  Auto-buy Hydrophones and Drifters.           │
-│  Auto-Buy II         20F OWNED  Auto-buy also covers Sonar Masts.            │
 ├──────────────────────────────────────────────────────────────────────────────┤
+│  Auto-Pulse: Fires a pulse whenever the capacitor is full; 1 Fathom (owned). │
 │BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000       │
 │                                                                              │
 │↑↓ focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar    │

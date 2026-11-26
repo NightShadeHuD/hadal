@@ -1,6 +1,7 @@
 //! Rendering dispatch, shared visual vocabulary, overlays, and too-small screen.
 
 pub mod archive;
+pub mod briefing;
 pub mod descent;
 pub mod dive;
 pub mod help;
@@ -13,6 +14,7 @@ pub use hits::{HitMap, Tab, command_for_click};
 use hadal_core::Decimal;
 use hadal_core::OfflineReport;
 use hadal_core::StateView;
+use hadal_core::content::ids::GeneratorId;
 use hadal_core::decimal::{to_human_ceil, to_human_floor, to_rate};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
@@ -41,6 +43,8 @@ pub enum Screen {
         /// Number of boot lines revealed so far.
         revealed: usize,
     },
+    /// The first-run briefing panel.
+    Briefing,
     /// The SONAR console.
     Sonar,
     /// The DESCENT screen.
@@ -65,6 +69,7 @@ impl Screen {
     pub fn tab(self) -> Option<Tab> {
         match self {
             Screen::Sonar | Screen::Boot { .. } | Screen::Dive { .. } => Some(Tab::Sonar),
+            Screen::Briefing => None,
             Screen::Descent => Some(Tab::Descent),
             Screen::Archive => Some(Tab::Archive),
             Screen::System => Some(Tab::System),
@@ -205,6 +210,12 @@ pub struct UiState<'a> {
     pub edit: Option<EditView<'a>>,
     /// Help overlay, if open.
     pub help: bool,
+    /// Help document scroll offset.
+    pub help_scroll: usize,
+    /// Demo mode: never persisted; station is a late-game preview.
+    pub demo: bool,
+    /// Generator row under the mouse, if any (SONAR selection explainer).
+    pub hovered: Option<GeneratorId>,
 }
 
 impl<'a> UiState<'a> {
@@ -236,6 +247,9 @@ impl<'a> UiState<'a> {
             now_unix: 0,
             edit: None,
             help: false,
+            help_scroll: 0,
+            demo: false,
+            hovered: None,
         }
     }
 }
@@ -264,6 +278,10 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
             );
             HitMap::default()
         }
+        Screen::Briefing => {
+            crate::render::briefing::render(frame, ui);
+            HitMap::default()
+        }
         Screen::Sonar => sonar::render(frame, ui),
         Screen::Descent => descent::render(frame, ui),
         Screen::Archive => archive::render(frame, ui),
@@ -285,13 +303,19 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         render_edit(frame, ui, edit);
     }
     if ui.help {
-        help::render(frame, ui);
+        let (total, visible) = help::render(frame, ui);
+        hits.help_total = total;
+        hits.help_visible = visible;
     }
     render_overlays(frame, ui);
 
-    // Modals own the interaction surface.
+    // Modals own the interaction surface; keep help metrics for scroll clamping.
     if ui.offline.is_some() || ui.edit.is_some() || ui.help || ui.confirm_descent {
+        let total = hits.help_total;
+        let visible = hits.help_visible;
         hits = HitMap::default();
+        hits.help_total = total;
+        hits.help_visible = visible;
     }
     hits
 }
@@ -459,6 +483,35 @@ pub fn fit_tail(text: &str, width: usize, ascii: bool) -> String {
     format!("{marker}{tail}")
 }
 
+/// One dim selection explainer line for the focused upgrade/hull or hovered generator.
+pub fn selection_line(ui: &UiState<'_>) -> Option<String> {
+    if let Some(line) = crate::model::selection_line(ui.view, ui.focus, ui.ascii) {
+        return Some(line);
+    }
+    if matches!(ui.screen, Screen::Sonar) {
+        return ui
+            .hovered
+            .map(|id| crate::model::generator_selection(ui.view, id));
+    }
+    None
+}
+
+/// Draw the focused selection's plain-words effect and exact cost.
+pub fn render_selection(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let Some(text) = selection_line(ui) else {
+        return;
+    };
+    let text = format!("  {text}");
+    let shown = fit_tail(&text, area.width as usize, ui.ascii);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            shown,
+            Style::new().fg(ui.palette.dim),
+        ))),
+        area,
+    );
+}
+
 /// Relative save age for SYSTEM.
 pub fn save_age(now_unix: u64, saved_at: u64) -> String {
     let age = now_unix.saturating_sub(saved_at);
@@ -533,6 +586,7 @@ pub fn overlay_box(
     title: &str,
 ) -> Rect {
     let popup = centered(area, width, height);
+    clear_overlay_band(frame, area, popup, palette, ascii);
     frame.render_widget(ratatui::widgets::Clear, popup);
     let block = Block::bordered()
         .border_set(border_set(ascii))
@@ -545,6 +599,43 @@ pub fn overlay_box(
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
     inner
+}
+
+/// Erase the console contents behind an overlay band, edge to edge, then
+/// restore the outer frame's vertical border so underlying rule junctions
+/// cannot survive at the frame edge. The frame border itself is preserved.
+fn clear_overlay_band(frame: &mut Frame, area: Rect, popup: Rect, palette: Palette, ascii: bool) {
+    if popup.width == 0 || popup.height == 0 || area.width < 2 {
+        return;
+    }
+    let band_width = area.width.saturating_sub(2);
+    if band_width > 0 {
+        let filler = " ".repeat(band_width as usize);
+        let style = Style::new().bg(palette.bg);
+        let mut lines = Vec::with_capacity(popup.height as usize);
+        for _ in 0..popup.height {
+            lines.push(Line::from(Span::styled(filler.clone(), style)));
+        }
+        frame.render_widget(
+            Paragraph::new(lines),
+            Rect::new(area.x.saturating_add(1), popup.y, band_width, popup.height),
+        );
+    }
+
+    let sides = border_set(ascii);
+    let side_style = Style::new().fg(palette.dim);
+    let right_x = area.x.saturating_add(area.width.saturating_sub(1));
+    let end_y = popup.y.saturating_add(popup.height);
+    for y in popup.y..end_y {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(sides.vertical_left, side_style))),
+            Rect::new(area.x, y, 1, 1),
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(sides.vertical_right, side_style))),
+            Rect::new(right_x, y, 1, 1),
+        );
+    }
 }
 
 fn render_edit(frame: &mut Frame, ui: &UiState<'_>, edit: EditView<'_>) {

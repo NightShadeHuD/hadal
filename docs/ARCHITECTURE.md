@@ -16,7 +16,7 @@ xtask (bin: xtask) ── standalone dev tool
   `save/{mod,paths,config,lock,migrate}`, `state`, `view`. No `ratatui`, `crossterm`,
   `clap`, wall-clock, RNG, environment, or filesystem in `tick()`.
 - **hadal-tui** (package `hadal`, bin `hadal`) — `main`, `app`, `boot`, `cli`, `glyphs`,
-  `input`, `model`, `render/{mod,sonar,descent,archive,system,help,dive,hits}`, `sanitize`,
+  `input`, `model`, `render/{mod,sonar,descent,archive,system,help,briefing,dive,hits}`, `sanitize`,
   `terminal`, `theme`, and `golden` (test only). Mutates state only through `Engine::apply`.
 - **hadal-sim** (`lib` + `main`) — headless pacing profiles (`active`, `idle`, `offline`),
   serialisers, and assertions. Depends on core only.
@@ -216,8 +216,10 @@ then `HADAL_DATA_DIR`, then the platform default. Files: `save.json`, `save.bak.
   colour depth, bell — persisted separately from the save.
 - **TUI-only modules:** `boot` (title/boot lines), `glyphs` (Unicode/ASCII sets), `input`
   (pure keymap + bounded queue), `model` (derived names, requirements, contributions,
-  governor validation, bucket progress, tutorial hint), `render/*` (screens, overlays, shared
-  vocabulary, too-small screen, click hit-testing), `sanitize` (C0/C1 control-character
+  governor validation, bucket progress, the always-on objective line and selection
+  explainers), `render/*` (screens including the `briefing` first-run/demo panel; overlays
+  including the scrollable `help` with its 14-term glossary and `clear_overlay_band`;
+  shared vocabulary, too-small screen, click hit-testing), `sanitize` (C0/C1 control-character
   scrubbing), `theme` (palettes, colour depth, WCAG contrast).
 
 ## Simulator

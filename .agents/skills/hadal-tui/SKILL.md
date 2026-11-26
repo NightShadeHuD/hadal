@@ -13,10 +13,10 @@ accessibility option, or terminal-restore behaviour.
    `StateView` accessors and mutates only through `Engine::apply()`; it holds no economy
    state.
 3. **Edit under `crates/hadal-tui/src/`:**
-   - Screens/overlays: `render/{sonar,descent,archive,system,help,dive}.rs`
+   - Screens/overlays: `render/{sonar,descent,archive,system,help,briefing,dive}.rs`
    - Shared visual vocabulary, too-small screen: `render/mod.rs`
    - Click hit-testing: `render/hits.rs`
-   - Derived names/requirements/progress/governor: `model.rs`
+   - Derived names/requirements/progress/governor/objective/selection: `model.rs`
    - Keymap and command queue: `input.rs`
    - Themes, colour depth, contrast: `theme.rs`
    - Glyph sets: `glyphs.rs`
@@ -42,12 +42,17 @@ accessibility option, or terminal-restore behaviour.
    ```
 7. **Run `cargo xtask gate`** before committing.
 
-## Golden set (20)
+## Golden set (27)
 
-`boot_100x30`, `too_small_79x24`, `sonar_{80x24_unicode,100x30_unicode,140x40}`,
-`sonar_{80x24_ascii,100x30_ascii,80x24_mono}`, `descent_{80x24,100x30,140x40}`,
-`archive_{80x24,100x30,locked_100x30}`, `system_{80x24,100x30,save_failure_80x24}`,
-`help_80x24`, `import_80x24`, `reset_80x24`.
+`boot_100x30`, `too_small_79x24`,
+`briefing_{80x24_unicode,80x24_ascii,100x30}`, `demo_banner_100x30`,
+`sonar_{80x24_unicode,100x30_unicode,140x40}`,
+`sonar_{80x24_ascii,100x30_ascii,80x24_mono}`,
+`descent_{80x24,100x30,140x40}`, `confirm_descent_80x24`,
+`archive_{80x24,100x30,locked_100x30}`,
+`system_{80x24,100x30,save_failure_80x24}`,
+`help_80x24`, `help_glossary_80x24`,
+`offline_summary_80x24`, `import_80x24`, `reset_80x24`.
 
 ## Checklist
 

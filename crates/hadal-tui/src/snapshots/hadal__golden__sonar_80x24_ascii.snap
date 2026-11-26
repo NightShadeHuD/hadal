@@ -18,7 +18,7 @@ expression: "draw(80, 24, &ui)"
 |d/D Drifter        0     250       +0.00/s LOCK  need 10 Hydrophones          |
 |m/M Sonar Mast     0  20,000       +0.00/s LOCK  need 6 Drifters              |
 |c/C Tidal Core     0   2.50M       +0.00/s LOCK  need 5 Sonar Masts           |
-|> SPACE: pulse the capacitor to wake the hydrophones.                         |
+|> SPACE  pulse the capacitor. A pulse pays 10 s of production.                |
 |SIGNAL CHAIN   u focus                                                        |
 |  Impedance Match       100 LOCK  need 1 Drifter . all production x2          |
 |  Sweep Profile         750 LOCK  need 10 Hydrophones . Hydrophones x3        |

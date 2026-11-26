@@ -15,7 +15,6 @@ expression: "draw(100, 30, &ui)"
 │ │  7,912             │                                                                           │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │HULL TREE   15/17 owned   ↑↓ focus   Enter buy                                                    │
-│  Ballast Recall       2F OWNED  Start every run with 5 Hydrophones.                              │
 │  Tuned Ballast        3F OWNED  Auto-tune to the carrier on every change.                        │
 │  Auto-Buy I           5F OWNED  Auto-buy Hydrophones and Drifters.                               │
 │  Auto-Buy II         20F OWNED  Auto-buy also covers Sonar Masts.                                │
@@ -28,6 +27,7 @@ expression: "draw(100, 30, &ui)"
 │  Null Array          50F OWNED  Global production ×2.                                            │
 │> Deep Field         600F NEED   Global production ×3.                                            │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Deep Field: Global production ×3; costs 600 Fathoms.                                            │
 │BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000                           │
 │                                                                                                  │
 │↑↓ focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar                        │

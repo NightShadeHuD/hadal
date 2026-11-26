@@ -52,14 +52,13 @@ Measured (debug unless noted):
 | Suite | Tests |
 |---|---|
 | `hadal-core --lib` | 189 |
-| `hadal` (TUI + headless) | 143 |
+| `hadal` (TUI + headless) | 160 |
 | `hadal-sim` | 8 |
 | `pacing` (release) | 1 |
-| **Total** | **341** |
+| **Total** | **358** |
 
 `tools/test-floor.txt` currently reads `247`. The floor may only **rise**; the gate refuses a
-count below it, and the infra worker refreshes it upward toward the measured total. The task
-is for the floor to reach the measured 341.
+count below it, and the infra worker raises it to the measured **358**.
 
 The `pacing` integration test takes **26.69 s in debug** but **1.73 s in release**; the gate
 runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
@@ -67,15 +66,18 @@ runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
 ## Golden / snapshot policy
 
 TUI layout goldens use **insta** (`=1.49.0`) with a `TestBackend` at three sizes (80×24,
-100×30, 140×40). There are **20** goldens:
+100×30, 140×40). There are **27** goldens:
 
 - `boot_100x30`, `too_small_79x24`
+- `briefing_80x24_unicode`, `briefing_80x24_ascii`, `briefing_100x30`
+- `demo_banner_100x30`
 - `sonar_80x24_unicode`, `sonar_100x30_unicode`, `sonar_140x40`
 - `sonar_80x24_ascii`, `sonar_100x30_ascii`, `sonar_80x24_mono`
-- `descent_80x24`, `descent_100x30`, `descent_140x40`
+- `descent_80x24`, `descent_100x30`, `descent_140x40`, `confirm_descent_80x24`
 - `archive_80x24`, `archive_100x30`, `archive_locked_100x30`
 - `system_80x24`, `system_100x30`, `system_save_failure_80x24`
-- `help_80x24`, `import_80x24`, `reset_80x24`
+- `help_80x24`, `help_glossary_80x24`
+- `offline_summary_80x24`, `import_80x24`, `reset_80x24`
 
 Workflow:
 
@@ -83,6 +85,17 @@ Workflow:
 - Inspect the resulting `.snap` diffs before committing; goldens verify layout structure and
   content placement, not source text.
 - Snapshots render settled animation values, so goldens are stable.
+
+Onboarding and overlay coverage: the briefing is exercised for a new save, demo and loaded
+save (`app::tests::briefing_shows_for_new_save_and_demo_only`,
+`briefing_any_key_dismisses_and_question_opens_help`); help scrolling
+(`help_scroll_clamps_both_ends`); objective transitions
+(`sonar_objective_line_three_states`, `model::tests::objective_line_priority_and_states`);
+selection explainers (`selection_lines_name_cost_and_effect`); help sections and glossary
+(`help::tests::help_covers_sections_objective_and_glossary`,
+`help_objective_matches_sonar_helper`); and the overlay background
+(`render::clear_overlay_band`, covered by `huge_overlay_string_is_clipped` and
+`confirmation_overlay_renders_at_80x24`).
 
 ## Robustness coverage (existing)
 

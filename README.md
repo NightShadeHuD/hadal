@@ -2,11 +2,25 @@
 
 A terminal-native deep-sea signals incremental. You operate Relay K-9, a derelict station 7,912 m down in the Kermadec Trench, coaxing Echo out of a repeating carrier wave. Each Descent sinks the station 500 m and rewrites the run. The terminal is the station console.
 
-**Status:** v0.1.0 — M1 vertical slice (pulse, buy, tune, descend, hulls, offline progress).
+**Status:** v0.1.1 — M1 vertical slice (pulse, buy, tune, descend, hulls, offline progress, onboarding).
+
+## Your first five minutes
+
+1. `SPACE` pulses the capacitor; a full pulse yields 10 s of production.
+2. `h` buys a Hydrophone (hold the pattern: `d/D`, `m/M`, `c/C` for higher tiers).
+3. `u` opens the Signal Chain; buy Impedance Match when it is affordable.
+4. `f` tunes the band — match the carrier for ×1.5 production.
+5. At `1.00M` Peak, press `2`, then `p`, then `y` to descend.
+
+- **Echo** — this run's spendable currency; generators produce it continuously.
+- **Peak** — the highest Echo you have reached this run; Descent checks it.
+- **Fathom** — the permanent currency a Descent grants; spend it on hulls.
+
+Press `?` for the scrollable in-game briefing and glossary. `--demo` starts with a demo briefing and never saves.
 
 ## Install
 
-Download release archives from the [Releases page](https://github.com/NightShadeHuD/hadal/releases); they will appear there once a tag is cut. Installers use `HADAL_DOWNLOAD_BASE` to locate the archive:
+Download release archives from the [Releases page](https://github.com/NightShadeHuD/hadal/releases). Installers use `HADAL_DOWNLOAD_BASE` to locate the archive:
 
 - **Linux:** `scripts/install.sh` — verifies SHA-256, installs to `~/.local/bin` by default.
 - **Windows:** `scripts/install.ps1` — verifies with `Get-FileHash`, installs to `%LOCALAPPDATA%\hadal\bin`.
@@ -175,7 +189,7 @@ HADAL makes no network calls and collects no telemetry. All state lives in the l
 
 ## Verification status
 
-Windows verified locally (release build, all test suites, simulator pacing, and CLI smoke via `--version`, `--help`, `save path`). CI passes on Ubuntu, Windows and macOS — fmt, clippy, workspace tests, MSRV 1.89, release pacing, and `cargo-deny` (see the [Actions page](https://github.com/NightShadeHuD/hadal/actions)). No release tag exists yet, so no release artifacts are claimed.
+Windows verified locally (release build, all test suites, simulator pacing, and CLI smoke via `--version`, `--help`, `save path`). CI passes on Ubuntu, Windows and macOS — fmt, clippy, workspace tests, MSRV 1.89, release pacing, and `cargo-deny` (see the [Actions page](https://github.com/NightShadeHuD/hadal/actions)). Release archives are published on the Releases page.
 
 ## License
 
