@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-11-26
+
+### Added
+
+- **Interactive 13-step tutorial** in two chapters (FIRST SIGNAL, SECOND SIGNAL): the coach
+  waits for each action, highlights the exact control, shows live waiting/progress, and
+  explains after the first and second Descent.
+- **Persisted tutorial progress** (`meta.tutorial`) saved with the game; skip anytime, and
+  replay from SYSTEM.
+- **Save schema v2** with a real `1 -> 2` migration that marks existing saves' tutorial
+  complete, so upgrading players are not dropped into step 0.
+
+### Removed
+
+- The first-run briefing wall (replaced by the interactive coach).
+
+### Fixed
+
+- The coach reserves layout space instead of covering its target; markers and columns align.
+- Tutorial order teaches the Drifter before Impedance Match.
+- The tuning step requires a real post-drift keypress.
+
 ## [0.1.2] - 2026-11-26
 
 ### Fixed

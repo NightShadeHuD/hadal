@@ -214,45 +214,69 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         Rect::new(inner.x, inner.y, inner.width, 1),
         &p,
         ui.screen.tab(),
+        crate::render::coach::target_tab(ui),
+        ui.ascii,
     );
     let content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
+    let coach = if ui.coach_active() {
+        crate::render::coach::HEIGHT
+    } else {
+        0
+    };
     let rows_area = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
+        Constraint::Length(coach),
         Constraint::Length(1),
     ])
-    .areas::<3>(content);
-    let (body, rule, footer) = (rows_area[0], rows_area[1], rows_area[2]);
+    .areas::<4>(content);
+    let (body, rule, _, footer) = (rows_area[0], rows_area[1], rows_area[2], rows_area[3]);
 
     let visible = body.height as usize;
-    let all = content_rows(view, body.width as usize, ui.ascii);
+    let all = content_rows(view, body.width.saturating_sub(2) as usize, ui.ascii);
     let total = all.len();
     let start = ui.archive_scroll.min(total.saturating_sub(visible));
     let lines: Vec<Line> = all
         .iter()
         .skip(start)
         .take(visible)
-        .map(|row| styled_row(row, p))
+        .map(|row| {
+            let mut line = styled_row(row, p);
+            let mut spans = vec![Span::styled("  ", dim(p))];
+            spans.extend(line.spans);
+            line = Line::from(spans);
+            line
+        })
         .collect();
     frame.render_widget(Paragraph::new(lines), body);
 
     render_rule(frame, rule, &p, g);
     let end = start.saturating_add(visible).min(total);
     let scroll_text = format!(
-        "{} {} scroll   PgUp/PgDn page   Esc back   {start}-{end}/{total}",
+        "{} {} scroll  PgUp/PgDn page  Esc back  {start}-{end}/{total}  ",
         g.arrow_up, g.arrow_down
     );
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(scroll_text, dim(p)))),
+        Paragraph::new(Line::from(vec![
+            Span::styled(scroll_text, dim(p)),
+            crate::render::coach::help_span(ui, p),
+        ])),
         footer,
     );
 
-    HitMap {
+    let mut hits = HitMap {
         tabs,
         archive_total: total,
         archive_visible: visible,
         ..HitMap::default()
-    }
+    };
+    hits.tutorial_target = match ui.coach_target() {
+        Some(crate::render::TutorialTarget::HelpKey) => Some(footer),
+        _ => hits.tabs.iter().find_map(|(rect, tab)| {
+            (Some(*tab) == crate::render::coach::target_tab(ui)).then_some(*rect)
+        }),
+    };
+    hits
 }
 
 fn styled_row(row: &ArchiveRow, p: P) -> Line<'static> {

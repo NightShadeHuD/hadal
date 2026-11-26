@@ -51,14 +51,14 @@ Measured (debug unless noted):
 
 | Suite | Tests |
 |---|---|
-| `hadal-core --lib` | 194 |
-| `hadal` (TUI + headless) | 167 |
+| `hadal-core --lib` | 208 |
+| `hadal` (TUI + headless) | 182 |
 | `hadal-sim` | 8 |
 | `pacing` (release) | 1 |
-| **Total** | **370** |
+| **Total** | **399** |
 
 `tools/test-floor.txt` currently reads `247`. The floor may only **rise**; the gate refuses a
-count below it, and the infra worker raises it to the measured **370**.
+count below it, and the infra worker raises it to the measured **399**.
 
 The `pacing` integration test takes **26.69 s in debug** but **1.73 s in release**; the gate
 runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
@@ -66,16 +66,17 @@ runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
 ## Golden / snapshot policy
 
 TUI layout goldens use **insta** (`=1.49.0`) with a `TestBackend` at three sizes (80×24,
-100×30, 140×40). There are **27** goldens:
+100×30, 140×40). There are **34** goldens:
 
-- `boot_100x30`, `too_small_79x24`
-- `briefing_80x24_unicode`, `briefing_80x24_ascii`, `briefing_100x30`
-- `demo_banner_100x30`
+- `boot_100x30`, `too_small_79x24`, `demo_banner_100x30`
+- `coach_step0_80x24`, `coach_step0_100x30`, `coach_waiting_hydro_80x24`,
+  `coach_tune_waiting_80x24`, `coach_hull_descent_80x24`, `coach_offline_80x24`,
+  `coach_ascii_80x24`, `skip_confirm_80x24`
 - `sonar_80x24_unicode`, `sonar_100x30_unicode`, `sonar_140x40`
-- `sonar_80x24_ascii`, `sonar_100x30_ascii`, `sonar_80x24_mono`
+- `sonar_80x24_ascii`, `sonar_100x30_ascii`, `sonar_80x24_mono`, `sonar_completed_80x24`
 - `descent_80x24`, `descent_100x30`, `descent_140x40`, `confirm_descent_80x24`
 - `archive_80x24`, `archive_100x30`, `archive_locked_100x30`
-- `system_80x24`, `system_100x30`, `system_save_failure_80x24`
+- `system_80x24`, `system_100x30`, `system_save_failure_80x24`, `system_tutorial_80x24`
 - `help_80x24`, `help_glossary_80x24`
 - `offline_summary_80x24`, `import_80x24`, `reset_80x24`
 
@@ -86,16 +87,21 @@ Workflow:
   content placement, not source text.
 - Snapshots render settled animation values, so goldens are stable.
 
-Onboarding and overlay coverage: the briefing is exercised for a new save, demo and loaded
-save (`app::tests::briefing_shows_for_new_save_and_demo_only`,
-`briefing_any_key_dismisses_and_question_opens_help`); help scrolling
-(`help_scroll_clamps_both_ends`); objective transitions
-(`sonar_objective_line_three_states`, `model::tests::objective_line_priority_and_states`);
-selection explainers (`selection_lines_name_cost_and_effect`); help sections and glossary
-(`help::tests::help_covers_sections_objective_and_glossary`,
-`help_objective_matches_sonar_helper`); and the overlay background
-(`render::clear_overlay_band`, covered by `huge_overlay_string_is_clipped` and
-`confirmation_overlay_renders_at_80x24`).
+Tutorial coverage: step predicates (`engine::tests::test_tutorial_predicates`,
+`test_tutorial_progress_values`), the full first-and-second-Descent progression
+(`test_tutorial_full_progression`, `test_tutorial_out_of_order_flags`,
+`test_tutorial_auto_advance_stops_at_acknowledge`), tune-requires-post-drift
+(`test_tune_requires_post_drift_keypress`), persistence, skip and replay
+(`test_tutorial_skip_and_replay_idempotent`, `test_tutorial_survives_descent`,
+`app::tests::tutorial_skip_persists_and_system_replay_restarts`,
+`app::tests::tutorial_replay_refused_after_first_descent`), the v1 fixture migration
+(`save::tests::test_v1_migration_inserts_completed_tutorial`,
+`save::tests::test_tutorial_step_roundtrips`), geometry and column alignment
+(`golden::coach_band_and_target_never_overlap`,
+`golden::generator_columns_align_with_fixed_gutter`), and the coach end-to-end through the
+first Descent (`app::tests::tutorial_coaches_new_save_and_resumes`,
+`app::tests::tutorial_ui_events_complete_steps_10_11_and_12`). Help scrolling remains covered
+by `help_scroll_clamps_both_ends`.
 
 ## Robustness coverage (existing)
 
@@ -105,6 +111,7 @@ selection explainers (`selection_lines_name_cost_and_effect`); help sections and
 | Resize storm across every screen | `golden::resize_storm_renders_every_screen_safely` |
 | Corrupt primary loads backup and preserves the corrupt file | `app::tests::corrupt_primary_loads_backup_and_recovers`; `save::tests::test_corrupt_primary_valid_backup_recovers` |
 | Future schema refused without overwrite | `app::tests::future_schema_is_refused_without_overwrite`; `save::tests::test_future_schema_refused_and_file_unchanged` |
+| v1 fixture migrates to v2 with a completed tutorial | `save::tests::test_v1_migration_inserts_completed_tutorial`; `save::tests::test_tutorial_step_roundtrips` |
 | Non-UTF8 save bytes preserved | `app::tests::non_utf8_save_bytes_are_preserved` |
 | Second instance hits the lock and reports a friendly error | `app::tests::second_instance_reports_friendly_lock_error`; `save::tests::test_lock_acquire_twice_and_release_on_drop` |
 | Atomic write + backup, no temp left behind | `save::tests::test_atomic_write_backup_and_no_temp` |

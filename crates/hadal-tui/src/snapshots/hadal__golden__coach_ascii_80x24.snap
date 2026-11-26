@@ -1,0 +1,28 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(80, 24, &coach_ui(&fixture, Screen::Sonar, true))"
+---
++ HADAL -- RELAY K-9 ----------------------------- DEPTH 7,912 m -- CARRIER 01 +
+|[1 SONAR]  2 DESCENT   3 ARCHIVE   4 SYSTEM                                   |
+|ECHO 0  +0.15/s                                                               |
+|PEAK 0   FATHOM 0                                                             |
+|NEXT   1.00M  ::::::::::   0%                                                 |
+|> PULSE ################################ 100%  READY                          |
+|TUNE    [1*][2][3][4][5][6]  TUNED                                            |
+|      GENERATORS OWNED    COST        OUTPUT STATE                            |
+|  h/H Hydrophone     0      10       +0.00/s NEED                             |
+|  d/D Drifter        0     250       +0.00/s LOCK  need 10 Hydrophones        |
+|  m/M Sonar Mast     0  20,000       +0.00/s LOCK  need 6 Drifters            |
+|  c/C Tidal Core     0   2.50M       +0.00/s LOCK  need 5 Sonar Masts         |
+|SIGNAL CHAIN   u focus                                                        |
+|  Impedance Match       100 LOCK  need 1 Drifter . all production x2          |
+|  Sweep Profile         750 LOCK  need 10 Hydrophones . Hydrophones x3        |
+|  Cascaded Gain       8,000 LOCK  need 1 Sonar Mast . all production x2       |
++------------------------------------------------------------------------------+
+|  TUTORIAL 01/13 - FIRST SIGNAL                                     [S] SKIP  |
+|  Press  SPACE  to pulse the capacitor.                                       |
+|  A pulse turns 10 seconds of production into Echo, the currency you spend    |
+|  this run.                                                                   |
+|[READY] SPACE pulse the capacitor                                             |
+|SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit        |
++------------------------------------------------------------------------------+

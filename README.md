@@ -2,21 +2,23 @@
 
 A terminal-native deep-sea signals incremental. You operate Relay K-9, a derelict station 7,912 m down in the Kermadec Trench, coaxing Echo out of a repeating carrier wave. Each Descent sinks the station 500 m and rewrites the run. The terminal is the station console.
 
-**Status:** v0.1.1 — M1 vertical slice (pulse, buy, tune, descend, hulls, offline progress, onboarding).
+**Status:** v0.1.3 — M1 vertical slice (pulse, buy, tune, descend, hulls, offline progress, interactive tutorial).
 
 ## Your first five minutes
 
-1. `SPACE` pulses the capacitor; a full pulse yields 10 s of production.
-2. `h` buys a Hydrophone (hold the pattern: `d/D`, `m/M`, `c/C` for higher tiers).
-3. `u` opens the Signal Chain; buy Impedance Match when it is affordable.
-4. `f` tunes the band — match the carrier for ×1.5 production.
-5. At `1.00M` Peak, press `2`, then `p`, then `y` to descend.
+A short interactive tutorial leads you: `SPACE` pulse → `h` buy a Hydrophone → `h` again to
+10 Hydrophones → `d` a Drifter → `u` buy Impedance Match → `f` tune when the carrier drifts →
+reach `1.00M` Peak → `2`, `p`, `y` to descend → buy Auto-Pulse → a second Descent → open
+SYSTEM with `4` → `?` for the field manual. The coach waits for each action and points at the
+exact control.
 
 - **Echo** — this run's spendable currency; generators produce it continuously.
 - **Peak** — the highest Echo you have reached this run; Descent checks it.
 - **Fathom** — the permanent currency a Descent grants; spend it on hulls.
 
-Press `?` for the scrollable in-game briefing and glossary. `--demo` starts with a demo briefing and never saves.
+`?` opens the field manual at any time. Saves from 0.1.2 and earlier are migrated as
+tutorial-complete, so they skip the coach; replay is available from SYSTEM before your first
+descent. `--demo` starts with the tutorial complete and never saves.
 
 ## Install
 

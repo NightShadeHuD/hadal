@@ -5,3 +5,4 @@
 pub mod ids;
 pub mod story;
 pub mod tables;
+pub mod tutorial;

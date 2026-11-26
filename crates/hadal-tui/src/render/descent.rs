@@ -13,10 +13,11 @@ use ratatui::widgets::Paragraph;
 use crate::glyphs::{self, Glyphs};
 use crate::model;
 use crate::render::{
-    Focus, HitMap, UiState, amount, bar, cost, count, overlay_box, rate_text, render_rule,
+    Focus, HitMap, UiState, amount, bar, coach, cost, count, overlay_box, rate_text, render_rule,
     render_selection, render_tabs, selection_line, titled_frame, window_start,
 };
 use crate::theme::Palette;
+use hadal_core::content::tutorial::TutorialTarget;
 
 type P = Palette;
 
@@ -70,6 +71,8 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         Rect::new(inner.x, inner.y, inner.width, 1),
         &p,
         ui.screen.tab(),
+        crate::render::coach::target_tab(ui),
+        ui.ascii,
     );
     let content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
     let mut hits = HitMap {
@@ -78,7 +81,16 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     };
 
     let top_height = (content.height / 3).clamp(9, 10);
-    let selection = if selection_line(ui).is_some() { 1 } else { 0 };
+    let coach = if ui.coach_active() {
+        crate::render::coach::HEIGHT
+    } else {
+        0
+    };
+    let selection = if !ui.coach_active() && selection_line(ui).is_some() {
+        1
+    } else {
+        0
+    };
     let rows = Layout::vertical([
         Constraint::Length(top_height),
         Constraint::Length(1),         // rule
@@ -87,9 +99,10 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         Constraint::Length(selection), // selection explainer
         Constraint::Length(1),         // governor
         Constraint::Length(1),         // notice
+        Constraint::Length(coach),     // reserved coach
         Constraint::Length(1),         // footer
     ])
-    .areas::<8>(content);
+    .areas::<9>(content);
 
     render_top(frame, rows[0], ui, g);
     render_rule(frame, rows[1], &p, g);
@@ -98,7 +111,19 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     render_selection(frame, rows[4], ui);
     render_governor(frame, rows[5], ui);
     render_notice(frame, rows[6], ui);
-    render_footer(frame, rows[7], &p, g);
+    render_footer(frame, rows[8], ui, g);
+
+    hits.tutorial_target = match ui.coach_target() {
+        Some(TutorialTarget::Hull(id)) => hits.hulls.iter().find_map(|(rect, index)| {
+            let target = model::flattened_hulls().iter().position(|hull| *hull == id);
+            (Some(*index) == target).then_some(*rect)
+        }),
+        Some(TutorialTarget::HelpKey) => Some(rows[8]),
+        _ => hits
+            .tabs
+            .iter()
+            .find_map(|(rect, tab)| (Some(*tab) == coach::target_tab(ui)).then_some(*rect)),
+    };
 
     if ui.confirm_descent {
         render_confirmation(frame, ui);
@@ -393,7 +418,17 @@ fn render_hull_tree(
         return;
     }
     let rows = hull_rows();
-    let start = window_start(rows.len(), visible, hull_focus_row(ui.focus));
+    let target_index = match ui.coach_target() {
+        Some(TutorialTarget::Hull(id)) => rows
+            .iter()
+            .position(|row| matches!(row, HullRow::Hull(hull, _) if *hull == id)),
+        _ => None,
+    };
+    let start = window_start(
+        rows.len(),
+        visible,
+        target_index.or_else(|| hull_focus_row(ui.focus)),
+    );
     for (offset, row) in rows.iter().skip(start).take(visible).enumerate() {
         let rect = Rect::new(area.x, area.y + 1 + offset as u16, area.width, 1);
         match row {
@@ -418,8 +453,15 @@ fn render_hull_row(frame: &mut Frame, area: Rect, id: HullId, index: usize, ui: 
     let locked = !owned && !view.hull_prereq_met(id);
     let affordable = view.hull_affordable(id);
     let focused = matches!(ui.focus, Focus::Hull(focus) if focus == index);
+    let targeted = coach::target_is(ui, TutorialTarget::Hull(id));
 
-    let marker = if focused { ">" } else { " " };
+    let marker = if targeted {
+        coach::marker(ui.ascii)
+    } else if focused {
+        ">"
+    } else {
+        " "
+    };
     let state = if owned {
         "OWNED"
     } else if locked {
@@ -463,7 +505,11 @@ fn render_hull_row(frame: &mut Frame, area: Rect, id: HullId, index: usize, ui: 
         ),
         Span::styled(
             format!("{:<17}", model::hull_name(id)),
-            if focused { bold_amber(p) } else { text(p) },
+            if focused || targeted {
+                bold_amber(p)
+            } else {
+                text(p)
+            },
         ),
         Span::styled(format!("{cost_text:>6}"), text(p)),
         Span::styled(format!(" {state:<6} "), state_style),
@@ -523,16 +569,20 @@ fn render_notice(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
     );
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, p: &Palette, g: &Glyphs) {
-    let p = *p;
+fn render_footer(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
+    let p = ui.palette;
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            format!(
-                "{}{} focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar",
-                g.arrow_up, g.arrow_down
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(
+                    "{}{} focus  Enter buy  p+y descend  +/- target  Esc back  ",
+                    g.arrow_up, g.arrow_down
+                ),
+                dim(p),
             ),
-            dim(p),
-        ))),
+            coach::help_span(ui, p),
+            Span::styled("  1 sonar", dim(p)),
+        ])),
         area,
     );
 }

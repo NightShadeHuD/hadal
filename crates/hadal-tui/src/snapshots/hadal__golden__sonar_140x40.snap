@@ -30,15 +30,15 @@ expression: "draw(140, 40, &ui)"
 │                    ◦◦            ·            ◦◦                    │STATION                                                             │
 │                       ◦◦         ·         ◦◦                       │DEPTH        9,412 m                                                │
 │                          ◦◦◦◦    ·    ◦◦◦◦                          │CARRIER      03                                                     │
-│PULSE  ████████████████████████████████ 100%  READY                  │TUNED        03  TUNED                                              │
-│TUNE   [1][2][3*][4][5][6]  TUNED                                    │RATE         36.3M/s                                                │
-│    GENERATORS OWNED    COST        OUTPUT STATE                     │PEAK         910M                                                   │
+│PULSE   ████████████████████████████████ 100%  READY                 │TUNED        03  TUNED                                              │
+│TUNE    [1][2][3*][4][5][6]  TUNED                                   │RATE         36.3M/s                                                │
+│      GENERATORS OWNED    COST        OUTPUT STATE                   │PEAK         910M                                                   │
 │   Costs rise with each unit.                                        │BEST PEAK    840B                                                   │
-│h/H Hydrophone    46   6,196  +47,816.99/s MAX                       │OFFLINE CAP  168 h                                                  │
-│d/D Drifter       28  25,742 +465,696.00/s MAX                       │DESCENTS     12                                                     │
-│m/M Sonar Mast    14 256,784      +4.65M/s MAX                       │ACHIEVEMENTS 10                                                     │
-│c/C Tidal Core     6   8.25M      +31.1M/s MAX                       │PULSE        READY                                                  │
+│  h/H Hydrophone    46   6,196  +47,816.99/s MAX                     │OFFLINE CAP  168 h                                                  │
+│  d/D Drifter       28  25,742 +465,696.00/s MAX                     │DESCENTS     12                                                     │
+│  m/M Sonar Mast    14 256,784      +4.65M/s MAX                     │ACHIEVEMENTS 10                                                     │
+│  c/C Tidal Core     6   8.25M      +31.1M/s MAX                     │PULSE        READY                                                  │
 │› h  buy a Hydrophone. It produces while you do not.                                                                                      │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│SPACE pulse   f tune   u chain   2 descent   Ctrl+S save   q quit                                                                         │
+│SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit                                                                    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

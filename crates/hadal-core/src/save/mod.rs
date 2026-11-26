@@ -30,7 +30,7 @@ pub use paths::{
 /// Envelope format marker.
 pub const FORMAT_MARKER: &str = "hadal-save";
 /// Schema version this build writes and supports.
-pub const SUPPORTED_SCHEMA: u32 = 1;
+pub const SUPPORTED_SCHEMA: u32 = 2;
 /// Application version written into new envelopes.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -334,7 +334,7 @@ impl SaveStore {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self {
             paths: SavePaths::new(dir),
-            migrations: MigrationChain::empty(),
+            migrations: MigrationChain::production(),
             counter: 0,
         }
     }
@@ -737,7 +737,7 @@ mod tests {
         store.save(&sample_state(1), 10).unwrap();
         let path = store.paths().save();
         let mut value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        value["schema_version"] = json!(2);
+        value["schema_version"] = json!(3);
         let bytes = serde_json::to_vec(&value).unwrap();
         write_bytes(&path, &bytes);
 
@@ -746,8 +746,8 @@ mod tests {
             matches!(
                 err,
                 SaveError::FutureSchema {
-                    found: 2,
-                    supported: 1
+                    found: 3,
+                    supported: 2
                 }
             ),
             "{err:?}"
@@ -954,6 +954,8 @@ mod tests {
                 .unwrap();
             let value = meta.remove("era_fathoms").unwrap();
             meta.insert("legacy_era".to_owned(), value);
+            // Genuine pre-v2 state has no tutorial field.
+            meta.remove("tutorial");
         }
         let mut envelope = json!({
             "format": FORMAT_MARKER,
@@ -975,11 +977,76 @@ mod tests {
             &dir.path().join("save.json"),
             &serde_json::to_vec(&v0_envelope(7)).unwrap(),
         );
-        let mut chain = MigrationChain::empty();
+        let mut chain = MigrationChain::production();
         chain.register(0, 1, mig_0_1);
         let mut store = SaveStore::with_migrations(dir.path(), chain);
         let loaded = store.load(50).unwrap();
         assert_eq!(loaded.state.meta.era_fathoms, 7);
+        assert!(loaded.state.meta.tutorial.completed);
+    }
+
+    fn v1_envelope(era: u32) -> Value {
+        let state = sample_state(era);
+        let mut state_value = serde_json::to_value(&state).unwrap();
+        state_value
+            .get_mut("meta")
+            .and_then(Value::as_object_mut)
+            .unwrap()
+            .remove("tutorial");
+        let mut envelope = json!({
+            "format": FORMAT_MARKER,
+            "schema_version": 1,
+            "app_version": "0.1.0",
+            "saved_at_unix": 11,
+            "save_counter": 3,
+            "state": state_value,
+        });
+        let checksum = canonical_checksum(&envelope);
+        envelope["checksum"] = Value::String(checksum);
+        envelope
+    }
+
+    #[test]
+    fn test_v1_migration_inserts_completed_tutorial() {
+        let dir = tempdir();
+        write_bytes(
+            &dir.path().join("save.json"),
+            &serde_json::to_vec(&v1_envelope(5)).unwrap(),
+        );
+        let mut store = SaveStore::new(dir.path());
+        let loaded = store.load(20).unwrap();
+        assert!(loaded.state.meta.tutorial.completed);
+        assert!(!loaded.state.meta.tutorial.skipped);
+        assert_eq!(loaded.state.meta.era_fathoms, 5);
+
+        // Stable across repeated loads.
+        let mut store2 = SaveStore::new(dir.path());
+        let loaded2 = store2.load(21).unwrap();
+        assert_eq!(state_digest(&loaded.state), state_digest(&loaded2.state));
+    }
+
+    #[test]
+    fn test_new_save_writes_schema_v2() {
+        let dir = tempdir();
+        let mut store = SaveStore::new(dir.path());
+        store.save(&sample_state(1), 10).unwrap();
+        let value: Value =
+            serde_json::from_slice(&std::fs::read(store.paths().save()).unwrap()).unwrap();
+        assert_eq!(value["schema_version"], json!(SUPPORTED_SCHEMA));
+        assert_eq!(SUPPORTED_SCHEMA, 2);
+    }
+
+    #[test]
+    fn test_tutorial_step_roundtrips() {
+        let dir = tempdir();
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.step = 5;
+        assert!(!engine.state.meta.tutorial.completed);
+        let mut store = SaveStore::new(dir.path());
+        store.save(&engine.state.clone(), 10).unwrap();
+        let loaded = store.load(20).unwrap();
+        assert_eq!(loaded.state.meta.tutorial.step, 5);
+        assert!(!loaded.state.meta.tutorial.completed);
     }
 
     #[test]

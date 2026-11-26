@@ -11,10 +11,11 @@ use ratatui::widgets::Paragraph;
 use crate::glyphs::{self, Glyphs};
 use crate::model;
 use crate::render::{
-    Focus, HitMap, UiState, amount, bar, cost, count, rate_text, render_rule, render_selection,
-    render_tabs, selection_line, titled_frame, window_start,
+    Focus, HitMap, UiState, amount, bar, coach, cost, count, rate_text, render_rule,
+    render_selection, render_tabs, selection_line, titled_frame, window_start,
 };
 use crate::theme::Palette;
+use hadal_core::content::tutorial::TutorialTarget;
 
 type P = Palette;
 
@@ -85,6 +86,8 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         Rect::new(inner.x, inner.y, inner.width, 1),
         &p,
         ui.screen.tab(),
+        crate::render::coach::target_tab(ui),
+        ui.ascii,
     );
     let mut content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
     let mut hits = HitMap {
@@ -96,12 +99,62 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         render_demo_banner(frame, banner, ui);
         content = Rect::new(content.x, content.y + 2, content.width, content.height - 2);
     }
-    if area.width >= 100 && area.height >= 30 {
+    if ui.coach_active() {
+        render_coach_compact(frame, content, ui, g, &mut hits);
+    } else if area.width >= 100 && area.height >= 30 {
         render_wide(frame, content, ui, g, &mut hits);
     } else {
         render_narrow(frame, content, ui, g, &mut hits);
     }
     hits
+}
+
+fn render_coach_compact(
+    frame: &mut Frame,
+    inner: Rect,
+    ui: &UiState<'_>,
+    g: &Glyphs,
+    hits: &mut HitMap,
+) {
+    let rows = Layout::vertical([
+        Constraint::Length(3),                            // resource band
+        Constraint::Length(1),                            // pulse
+        Constraint::Length(1),                            // carrier
+        Constraint::Length(1),                            // generator header
+        Constraint::Length(4),                            // generators
+        Constraint::Min(0),                               // signal chain
+        Constraint::Length(1),                            // rule above coach
+        Constraint::Length(crate::render::coach::HEIGHT), // reserved coach
+        Constraint::Length(1),                            // footer
+    ])
+    .areas::<9>(inner);
+
+    render_band(frame, rows[0], ui, g);
+    render_capacitor(frame, rows[1], ui, g);
+    render_carrier(frame, rows[2], ui);
+    render_generator_header(frame, rows[3], &ui.palette);
+    render_generators(frame, rows[4], ui, hits);
+    render_chain(frame, rows[5], ui, g, hits, false);
+    render_rule(frame, rows[6], &ui.palette, g);
+    render_footer(frame, rows[8], ui);
+
+    let target = ui.coach_target();
+    hits.tutorial_target = match target {
+        Some(TutorialTarget::PulseBar) => Some(rows[1]),
+        Some(TutorialTarget::TuneStrip) => Some(rows[2]),
+        Some(TutorialTarget::PeakReadout) => Some(rows[0]),
+        Some(TutorialTarget::ChainPanel) => Some(Rect::new(rows[5].x, rows[5].y, rows[5].width, 1)),
+        Some(TutorialTarget::Generator(id)) => Some(Rect::new(
+            rows[4].x,
+            rows[4].y.saturating_add(id.index() as u16),
+            rows[4].width,
+            1,
+        )),
+        Some(TutorialTarget::HelpKey) => Some(rows[8]),
+        _ => hits.tabs.iter().find_map(|(rect, tab)| {
+            (Some(*tab) == crate::render::coach::target_tab(ui)).then_some(*rect)
+        }),
+    };
 }
 
 // ---------------------------------------------------------------------
@@ -137,7 +190,7 @@ fn render_narrow(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, h
     render_selection(frame, rows[8], ui);
     render_chain(frame, rows[9], ui, g, hits, false);
     render_rule(frame, rows[10], &ui.palette, g);
-    render_footer(frame, rows[11], &ui.palette);
+    render_footer(frame, rows[11], ui);
 }
 
 fn render_wide(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
@@ -198,7 +251,7 @@ fn render_wide(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hit
     render_selection(frame, rows[3], ui);
     render_hint(frame, rows[4], ui, g);
     render_rule(frame, rows[5], &ui.palette, g);
-    render_footer(frame, rows[6], &ui.palette);
+    render_footer(frame, rows[6], ui);
 }
 
 fn render_demo_banner(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
@@ -218,9 +271,9 @@ fn render_demo_banner(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
         )
     };
     let second = if compact {
-        "automation is on; keys additive   ? briefing   1-4 screens"
+        "automation is on; keys additive   ? manual   1-4 screens"
     } else {
-        "the station plays itself; keys are additive   ? briefing   1-4 screens"
+        "the station plays itself; keys are additive   ? manual   1-4 screens"
     };
     let prefix = "DEMO // NOTHING IS SAVED";
     let rest = first.strip_prefix(prefix).unwrap_or("");
@@ -280,7 +333,18 @@ fn render_band(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
         );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("PEAK ", dim(p)),
+                Span::styled(
+                    if coach::target_is(ui, TutorialTarget::PeakReadout) {
+                        format!("{} PEAK ", coach::marker(ui.ascii))
+                    } else {
+                        "PEAK ".to_owned()
+                    },
+                    if coach::target_is(ui, TutorialTarget::PeakReadout) {
+                        bold_amber(p)
+                    } else {
+                        dim(p)
+                    },
+                ),
                 Span::styled(amount(ui.view.peak()), text(p)),
                 Span::styled("   FATHOM ", dim(p)),
                 Span::styled(count(ui.view.fathoms()), amber(p)),
@@ -368,7 +432,18 @@ fn render_band_right(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs
     let rows = Layout::vertical([Constraint::Length(1); 3]).areas::<3>(area);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("PEAK   ", dim(p)),
+            Span::styled(
+                if coach::target_is(ui, TutorialTarget::PeakReadout) {
+                    format!("{} PEAK ", coach::marker(ui.ascii))
+                } else {
+                    "PEAK   ".to_owned()
+                },
+                if coach::target_is(ui, TutorialTarget::PeakReadout) {
+                    bold_amber(p)
+                } else {
+                    dim(p)
+                },
+            ),
             Span::styled(amount(ui.view.peak()), text(p)),
         ])),
         rows[0],
@@ -559,8 +634,17 @@ fn render_capacitor(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs)
     let remaining = capacity.saturating_sub(charge).div_ceil(10);
     let width = (area.width.saturating_sub(34) as usize).clamp(8, 32);
 
+    let pulse_target = coach::target_is(ui, TutorialTarget::PulseBar);
+    let pulse_label = if pulse_target {
+        format!("{} PULSE ", coach::marker(ui.ascii))
+    } else {
+        "PULSE   ".to_owned()
+    };
     let mut spans = vec![
-        Span::styled("PULSE  ", dim(p)),
+        Span::styled(
+            pulse_label,
+            if pulse_target { bold_amber(p) } else { dim(p) },
+        ),
         Span::styled(
             bar(fraction, width, g),
             if ready { accent(p) } else { text(p) },
@@ -585,7 +669,16 @@ fn render_carrier(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
     let matched = ui.view.carrier_matched();
     let flash = ui.anim.carrier_flash;
 
-    let mut spans = vec![Span::styled("TUNE   ", dim(p))];
+    let tune_target = coach::target_is(ui, TutorialTarget::TuneStrip);
+    let tune_label = if tune_target {
+        format!("{} TUNE  ", coach::marker(ui.ascii))
+    } else {
+        "TUNE    ".to_owned()
+    };
+    let mut spans = vec![Span::styled(
+        tune_label,
+        if tune_target { bold_amber(p) } else { dim(p) },
+    )];
     for band in 0..6u8 {
         let number = band + 1;
         let label = if band == tuned {
@@ -620,7 +713,7 @@ fn render_generator_header(frame: &mut Frame, area: Rect, p: &Palette) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!(
-                "{:<4}{:<10}{:>6} {:>7} {:>13} STATE",
+                "  {:<4}{:<10}{:>6} {:>7} {:>13} STATE",
                 "", "GENERATORS", "OWNED", "COST", "OUTPUT"
             ),
             dim(p),
@@ -667,12 +760,22 @@ fn render_generator(
 
     let key = model::generator_key(id);
     let key_hint = format!("{key}/{}", key.to_ascii_uppercase());
+    let targeted = coach::target_is(ui, TutorialTarget::Generator(id));
+    let gutter = if targeted {
+        format!("{} ", coach::marker(ui.ascii))
+    } else {
+        "  ".to_owned()
+    };
     let output = format!("+{}/s", rate_text(model::generator_contribution(view, id)));
     let mut spans = vec![
-        Span::styled(format!("{key_hint:<4}"), flash_style(flash, accent(p), p)),
+        Span::styled(gutter, if targeted { bold_amber(p) } else { dim(p) }),
+        Span::styled(
+            format!("{key_hint:<4}"),
+            flash_style(flash, if targeted { bold_amber(p) } else { accent(p) }, p),
+        ),
         Span::styled(
             format!("{:<10}", model::generator_name(id)),
-            flash_style(flash, text(p), p),
+            flash_style(flash, if targeted { bold_amber(p) } else { text(p) }, p),
         ),
         Span::styled(format!("{owned:>6}"), flash_style(flash, text(p), p)),
         Span::styled(
@@ -727,9 +830,14 @@ fn render_chain(
     } else {
         "   u focus".to_owned()
     };
+    let chain_title = if coach::target_is(ui, TutorialTarget::ChainPanel) {
+        format!("{} SIGNAL CHAIN", coach::marker(ui.ascii))
+    } else {
+        "SIGNAL CHAIN".to_owned()
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("SIGNAL CHAIN", bold_amber(p)),
+            Span::styled(chain_title, bold_amber(p)),
             Span::styled(hint, dim(p)),
         ])),
         Rect::new(area.x, area.y, area.width, 1),
@@ -871,6 +979,9 @@ fn kv(label: &str, value: String, p: P) -> Line<'static> {
 }
 
 fn render_hint(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
+    if ui.coach_active() {
+        return;
+    }
     let p = ui.palette;
     let hint = model::objective_line(ui.view, ui.ascii);
     frame.render_widget(
@@ -882,13 +993,14 @@ fn render_hint(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
     );
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, p: &Palette) {
-    let p = *p;
+fn render_footer(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "SPACE pulse   f tune   u chain   2 descent   Ctrl+S save   q quit",
-            dim(p),
-        ))),
+        Paragraph::new(Line::from(vec![
+            Span::styled("SPACE pulse  f tune  u chain  2 descent  ", dim(p)),
+            coach::help_span(ui, p),
+            Span::styled("  Ctrl+S save  q quit", dim(p)),
+        ])),
         area,
     );
 }

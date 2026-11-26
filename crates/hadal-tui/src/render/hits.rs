@@ -40,6 +40,8 @@ pub struct HitMap {
     pub help_total: usize,
     /// Visible HELP document rows (for scroll clamping).
     pub help_visible: usize,
+    /// The highlighted tutorial target's visible rect.
+    pub tutorial_target: Option<Rect>,
 }
 
 fn contains(rect: Rect, x: u16, y: u16) -> bool {

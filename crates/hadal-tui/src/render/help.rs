@@ -1,4 +1,4 @@
-//! HELP overlay: a scrollable briefing, keymap, rules, and glossary.
+//! HELP overlay: a scrollable manual, keymap, rules, and glossary.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;

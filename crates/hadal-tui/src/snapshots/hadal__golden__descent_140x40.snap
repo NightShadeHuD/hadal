@@ -40,5 +40,5 @@ expression: "draw(140, 40, &ui)"
 │  Auto-Pulse: Fires a pulse whenever the capacitor is full; 1 Fathom (owned).                                                             │
 │BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000                                                                   │
 │                                                                                                                                          │
-│↑↓ focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar                                                                │
+│↑↓ focus  Enter buy  p+y descend  +/- target  Esc back  ? manual  1 sonar                                                                 │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

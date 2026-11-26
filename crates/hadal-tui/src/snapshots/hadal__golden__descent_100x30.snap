@@ -30,5 +30,5 @@ expression: "draw(100, 30, &ui)"
 │  Deep Field: Global production ×3; costs 600 Fathoms.                                            │
 │BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000                           │
 │                                                                                                  │
-│↑↓ focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar                        │
+│↑↓ focus  Enter buy  p+y descend  +/- target  Esc back  ? manual  1 sonar                         │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

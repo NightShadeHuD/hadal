@@ -13,7 +13,9 @@ accessibility option, or terminal-restore behaviour.
    `StateView` accessors and mutates only through `Engine::apply()`; it holds no economy
    state.
 3. **Edit under `crates/hadal-tui/src/`:**
-   - Screens/overlays: `render/{sonar,descent,archive,system,help,briefing,dive}.rs`
+   - Screens/overlays: `render/{sonar,descent,archive,system,help,coach,dive}.rs`
+   - Tutorial copy/step table (in core): `crates/hadal-core/src/content/tutorial.rs`
+   - Coach band, highlights, skip/replay confirm: `render/coach.rs`
    - Shared visual vocabulary, too-small screen: `render/mod.rs`
    - Click hit-testing: `render/hits.rs`
    - Derived names/requirements/progress/governor/objective/selection: `model.rs`
@@ -42,15 +44,16 @@ accessibility option, or terminal-restore behaviour.
    ```
 7. **Run `cargo xtask gate`** before committing.
 
-## Golden set (27)
+## Golden set (34)
 
-`boot_100x30`, `too_small_79x24`,
-`briefing_{80x24_unicode,80x24_ascii,100x30}`, `demo_banner_100x30`,
+`boot_100x30`, `too_small_79x24`, `demo_banner_100x30`,
+`coach_{step0_80x24,step0_100x30,waiting_hydro_80x24,tune_waiting_80x24,hull_descent_80x24,offline_80x24,ascii_80x24}`,
+`skip_confirm_80x24`,
 `sonar_{80x24_unicode,100x30_unicode,140x40}`,
-`sonar_{80x24_ascii,100x30_ascii,80x24_mono}`,
+`sonar_{80x24_ascii,100x30_ascii,80x24_mono}`, `sonar_completed_80x24`,
 `descent_{80x24,100x30,140x40}`, `confirm_descent_80x24`,
 `archive_{80x24,100x30,locked_100x30}`,
-`system_{80x24,100x30,save_failure_80x24}`,
+`system_{80x24,100x30,save_failure_80x24}`, `system_tutorial_80x24`,
 `help_80x24`, `help_glossary_80x24`,
 `offline_summary_80x24`, `import_80x24`, `reset_80x24`.
 
@@ -60,6 +63,7 @@ accessibility option, or terminal-restore behaviour.
 - [ ] Accessibility: 80×24, colour-not-sole-encoding, reduce motion, ASCII/mono
 - [ ] Terminal restored on every exit path (normal and panic)
 - [ ] No economy state in the TUI; all mutation via `Engine::apply()`
+- [ ] Tutorial copy/order lives in `content/tutorial.rs`; replay stays allowed only before the first Descent
 - [ ] Keymap and session tests pass
 - [ ] `cargo xtask gate` passes
 

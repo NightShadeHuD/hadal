@@ -75,9 +75,11 @@ only, and the UI reads `StateView` and mutates via `Action`.
 - *Check:* `save::tests::test_import_bad_checksum_leaves_directory_identical`,
   `test_future_schema_refused_and_file_unchanged`, `test_checksum_tamper_detected_and_preserved`.
 
-**D3** Every older schema loads via migration and fixture.
+**D3** Every older schema loads via migration and fixture; the shipped `1 -> 2` migration
+marks existing saves' tutorial complete.
 - *Why:* a schema bump must not strand old saves.
-- *Check:* `save::tests::test_migration_chain_0_to_1_fixture`, `test_migration_chain_ordering`,
+- *Check:* `save::tests::test_v1_migration_inserts_completed_tutorial`,
+  `test_migration_chain_0_to_1_fixture`, `test_migration_chain_ordering`,
   `test_v0_without_migration_is_typed_error`.
 
 **D4** One writer at a time; an older save never clobbers a newer one; a corrupt primary
@@ -149,6 +151,13 @@ profiles.
 - *Why:* a rename would corrupt old saves.
 - *Check:* `ids::tests::test_generator_ids`, `test_upgrade_ids`, `test_hull_ids`,
   `test_achievement_ids`, `test_log_ids`, `test_unknown_id_rejected`.
+
+**I2** Tutorial content is defined by one step table, its state is persisted in
+`meta.tutorial`, and it never changes production or costs; every step has a predicate test.
+- *Why:* onboarding must be data, not code branches, and must not perturb the economy.
+- *Check:* `content::tutorial::tests::test_steps_table`,
+  `engine::tests::test_tutorial_predicates`, `test_tutorial_full_progression`,
+  `save::tests::test_tutorial_step_roundtrips`.
 
 ## J. Gate discipline
 

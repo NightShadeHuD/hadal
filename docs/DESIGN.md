@@ -72,20 +72,38 @@ actions are one keystroke.
 `abyss` (default), `high-contrast`, `amber-crt`, `mono`. Colour is never the only carrier of
 state; matched bands and alerts also carry text labels.
 
-## Onboarding
+## Tutorial
 
-- **First-run briefing.** A one-panel briefing is shown after the boot sequence for a new
-  save, and always with `--demo`. It is derived from state — there is no saved "seen" flag —
-  so it never reappears once a save exists.
-- **Objective line.** SONAR shows one always-on next action with its reason: pulse when the
-  capacitor is full → buy an affordable Hydrophone → buy Impedance Match → tune when the
-  carrier changes → reach 1.00M Peak → descend → buy the nearest hull. It is derived and
-  single-action, never a checklist.
-- **Help.** `?` opens a scrollable briefing with BASICS → WHAT TO DO NOW → CONTROLS →
-  DESCENT & FATHOMS → OFFLINE → NUMBERS → GLOSSARY → VERSION, including a 14-term glossary.
-- **Copy tone.** Restrained, procedural, second person; no lore dumps, jokes or mascots.
-- **Demo honesty.** `--demo` is explicitly labelled with a persistent `DEMO // NOTHING IS
-  SAVED` banner and a demo briefing; it never saves or locks.
+Purpose: teach by doing, not a text wall. The tutorial is an interactive coach, not a
+first-run briefing.
+
+- **Chapters.** FIRST SIGNAL (steps 1–9) reaches the first Descent and the first hull; SECOND
+  SIGNAL (steps 10–13) covers the second Descent, SYSTEM, the manual and offline.
+- **Persistence.** Progress lives in `MetaState::tutorial` (`TutorialState`) and is saved with
+  the game. A legacy save with no tutorial data defaults to complete; a new save starts at
+  step 1.
+- **Skip and replay.** Skip is always available. Replay from SYSTEM is allowed only before the
+  first Descent (`descents == 0`); once a run has descended, start a new save instead.
+- **Copy rules.** The action comes first, jargon is named only after it is introduced, and
+  there are no lore dumps or mascots.
+- **Neutrality.** The tutorial never changes production, costs or prestige; steps advance
+  deterministically from what the player does.
+
+| # | id | chapter | action / target | completes when |
+|---|---|---|---|---|
+| 1 | Pulse | FIRST SIGNAL | SPACE (pulse bar) | a manual pulse fires |
+| 2 | FirstGenerator | FIRST SIGNAL | `h` (Hydrophone row) | ≥1 Hydrophone |
+| 3 | SecondGenerator | FIRST SIGNAL | `h` again (Hydrophone row) | ≥2 Hydrophones |
+| 4 | Drifter | FIRST SIGNAL | reach 10 Hydrophones, `d` (Drifter row) | ≥1 Drifter |
+| 5 | Upgrade | FIRST SIGNAL | `u`, Enter (Signal Chain) | Impedance Match owned |
+| 6 | Tune | FIRST SIGNAL | `f` after the carrier drifts (tune strip) | tuned to the carrier since the drift |
+| 7 | Peak | FIRST SIGNAL | reach `1.00M` (Peak readout) | Peak ≥ 1,000,000 |
+| 8 | Descend | FIRST SIGNAL | `2`, `p`, `y` (DESCENT) | ≥1 Descent |
+| 9 | Hull | FIRST SIGNAL | `2`, select Auto-Pulse, Enter (hull row) | Auto-Pulse owned |
+| 10 | SecondDescent | SECOND SIGNAL | reach `1.00M` again and descend | ≥2 Descents |
+| 11 | System | SECOND SIGNAL | `4` (SYSTEM tab) | SYSTEM opened |
+| 12 | Manual | SECOND SIGNAL | `?`, Esc (help key) | manual opened then closed |
+| 13 | Offline | SECOND SIGNAL | Enter (acknowledge) | tutorial acknowledged |
 
 ## Layer table
 

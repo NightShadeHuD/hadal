@@ -44,6 +44,50 @@ impl Default for Stats {
     }
 }
 
+/// Persistent tutorial progress.
+///
+/// `Default` is the legacy-safe value: an existing save with no tutorial data
+/// is treated as completed. New games use [`TutorialState::new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TutorialState {
+    pub(crate) step: u8,
+    pub(crate) completed: bool,
+    pub(crate) skipped: bool,
+    pub(crate) seen_carrier_change: bool,
+    pub(crate) tuned_since_change: bool,
+    pub(crate) manual_opened: bool,
+    pub(crate) manual_closed: bool,
+    pub(crate) system_opened: bool,
+    pub(crate) acknowledged: bool,
+}
+
+impl Default for TutorialState {
+    fn default() -> Self {
+        Self {
+            step: 0,
+            completed: true,
+            skipped: false,
+            seen_carrier_change: false,
+            tuned_since_change: false,
+            manual_opened: false,
+            manual_closed: false,
+            system_opened: false,
+            acknowledged: false,
+        }
+    }
+}
+
+impl TutorialState {
+    /// A fresh, active tutorial at the first step.
+    pub fn new() -> Self {
+        Self {
+            completed: false,
+            ..Self::default()
+        }
+    }
+}
+
 /// Persistent meta state that survives Descent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +103,8 @@ pub struct MetaState {
     pub(crate) logs: BTreeSet<LogId>,
     /// Which carrier bands have ever been matched by a tuning action.
     pub(crate) bands_seen: [bool; 6],
+    #[serde(default)]
+    pub(crate) tutorial: TutorialState,
     pub(crate) stats: Stats,
 }
 
@@ -119,6 +165,7 @@ impl GameState {
                 achievements: BTreeSet::new(),
                 logs,
                 bands_seen: [false; 6],
+                tutorial: TutorialState::new(),
                 stats: Stats::default(),
             },
             run: RunState::fresh(),
@@ -196,5 +243,24 @@ mod tests {
             .unwrap()
             .insert("bogus".to_owned(), serde_json::json!(true));
         assert!(serde_json::from_value::<GameState>(value).is_err());
+    }
+
+    #[test]
+    fn test_tutorial_legacy_and_active_defaults() {
+        let legacy = TutorialState::default();
+        assert!(legacy.completed, "default must be legacy-safe/completed");
+        assert_eq!(legacy.step, 0);
+        assert!(!legacy.skipped);
+        assert!(!legacy.acknowledged);
+        assert!(!legacy.tuned_since_change);
+
+        let active = TutorialState::new();
+        assert!(!active.completed);
+        assert!(!active.skipped);
+        assert_eq!(active.step, 0);
+        assert!(!active.seen_carrier_change);
+        assert!(!active.tuned_since_change);
+
+        assert_eq!(GameState::new().meta.tutorial, active);
     }
 }

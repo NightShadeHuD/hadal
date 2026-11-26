@@ -10,6 +10,8 @@ use crossterm::event::{
 use hadal_core::content::ids::{GeneratorId, HullId, UpgradeId};
 use hadal_core::content::story::{BOOT_LINES, log_text};
 use hadal_core::content::tables::achievement_def;
+use hadal_core::content::tutorial::{STEPS, TutorialStepId};
+use hadal_core::engine::TutorialUiEvent;
 use hadal_core::save::SavePaths;
 use hadal_core::save::config::{Config, ConfigWarning, load_config, save_config};
 use hadal_core::save::lock::LockError;
@@ -362,11 +364,14 @@ pub struct Session {
     archive_visible: usize,
     edit: Option<EditState>,
     help: bool,
-    briefing: bool,
     help_scroll: usize,
     help_total: usize,
     help_visible: usize,
     hovered_generator: Option<GeneratorId>,
+    tutorial_step: u8,
+    tutorial_finished: bool,
+    confirm_tutorial_skip: bool,
+    confirm_tutorial_replay: bool,
     last_save_unix: Option<u64>,
     last_hull_click: Option<(usize, Instant)>,
     bell_once: bool,
@@ -392,6 +397,9 @@ impl Session {
         if opts.demo {
             let engine = Engine::demo();
             let anim = AnimState::new(engine.view().echo());
+            let tutorial = engine.tutorial();
+            let tutorial_step = tutorial.index;
+            let tutorial_finished = tutorial.completed || tutorial.skipped;
             return Ok(Self {
                 engine,
                 ascii: opts.ascii,
@@ -428,11 +436,14 @@ impl Session {
                 archive_visible: 0,
                 edit: None,
                 help: false,
-                briefing: true,
                 help_scroll: 0,
                 help_total: 0,
                 help_visible: 0,
                 hovered_generator: None,
+                tutorial_step,
+                tutorial_finished,
+                confirm_tutorial_skip: false,
+                confirm_tutorial_replay: false,
                 last_save_unix: None,
                 last_hull_click: None,
                 bell_once: false,
@@ -501,11 +512,14 @@ impl Session {
             archive_visible: 0,
             edit: None,
             help: false,
-            briefing: false,
             help_scroll: 0,
             help_total: 0,
             help_visible: 0,
             hovered_generator: None,
+            tutorial_step: 0,
+            tutorial_finished: false,
+            confirm_tutorial_skip: false,
+            confirm_tutorial_replay: false,
             last_save_unix: None,
             last_hull_click: None,
             bell_once: false,
@@ -530,9 +544,11 @@ impl Session {
             session.boot = Boot::New {
                 started: Instant::now(),
             };
-            session.briefing = true;
         }
 
+        let tutorial = session.engine.tutorial();
+        session.tutorial_step = tutorial.index;
+        session.tutorial_finished = tutorial.completed || tutorial.skipped;
         session.save_now(now_unix);
         session.anim = AnimState::new(session.engine.view().echo());
         Ok(session)
@@ -561,9 +577,6 @@ impl Session {
                 },
                 Boot::Done => Screen::Sonar,
             };
-        }
-        if self.briefing {
-            return Screen::Briefing;
         }
         match self.current {
             ScreenKind::Sonar => Screen::Sonar,
@@ -675,6 +688,7 @@ impl Session {
                     self.confirm_descent = false;
                 } else if self.help {
                     self.help = false;
+                    self.record_tutorial_ui(TutorialUiEvent::ManualClosed);
                 } else if self.edit.is_some() {
                     self.edit = None;
                 } else if matches!(self.current, ScreenKind::Archive | ScreenKind::System) {
@@ -700,10 +714,25 @@ impl Session {
                     self.adjust_governor(delta);
                 }
             }
+            Command::TutorialSkip => {
+                if self.tutorial_active()
+                    && !self.help
+                    && self.edit.is_none()
+                    && !self.offline_visible
+                    && !self.confirm_descent
+                    && !self.confirm_tutorial_replay
+                {
+                    self.confirm_tutorial_skip = true;
+                }
+            }
             Command::Help => {
-                self.help = !self.help;
                 if self.help {
+                    self.help = false;
+                    self.record_tutorial_ui(TutorialUiEvent::ManualClosed);
+                } else {
+                    self.help = true;
                     self.help_scroll = 0;
+                    self.record_tutorial_ui(TutorialUiEvent::ManualOpened);
                 }
             }
             Command::PageUp => self.page(-1),
@@ -752,7 +781,110 @@ impl Session {
         true
     }
 
+    fn tutorial_active(&self) -> bool {
+        let tutorial = self.engine.tutorial();
+        !tutorial.completed && !tutorial.skipped
+    }
+
+    fn tutorial_offline_step(&self) -> bool {
+        let tutorial = self.engine.tutorial();
+        !tutorial.completed && !tutorial.skipped && tutorial.step.id == TutorialStepId::Offline
+    }
+
+    fn record_tutorial_ui(&mut self, event: TutorialUiEvent) {
+        if self.tutorial_active() {
+            self.engine.tutorial_ui(event);
+        }
+    }
+
+    fn sync_tutorial(&mut self, now: Instant, now_unix: u64) {
+        let tutorial = self.engine.tutorial();
+        if tutorial.completed || tutorial.skipped {
+            if !self.tutorial_finished {
+                self.tutorial_finished = true;
+                if tutorial.completed && !tutorial.skipped {
+                    self.push_toast(
+                        model::ascii_text(
+                            "TUTORIAL COMPLETE — free play. ? manual · 3 archive · 4 settings",
+                            self.ascii,
+                        ),
+                        now,
+                    );
+                }
+                self.save_now(now_unix);
+            }
+            return;
+        }
+        self.tutorial_finished = false;
+        if tutorial.index != self.tutorial_step {
+            self.tutorial_step = tutorial.index;
+            if tutorial.index > 0 {
+                let id = STEPS[tutorial.index as usize - 1].id;
+                let message = match id {
+                    TutorialStepId::Pulse => "pulse received",
+                    TutorialStepId::FirstGenerator | TutorialStepId::SecondGenerator => {
+                        "hydrophone online"
+                    }
+                    TutorialStepId::Drifter => "drifter online",
+                    TutorialStepId::Upgrade => "impedance ×2",
+                    TutorialStepId::Tune => "carrier matched ×1.5",
+                    TutorialStepId::Peak => "threshold reached",
+                    TutorialStepId::Descend => "Fathoms are permanent",
+                    TutorialStepId::Hull => "Auto-Pulse online",
+                    TutorialStepId::SecondDescent => "second descent",
+                    TutorialStepId::System => "console map learned",
+                    TutorialStepId::Manual => "manual read",
+                    TutorialStepId::Offline => "",
+                };
+                if !message.is_empty() {
+                    self.push_toast(model::ascii_text(message, self.ascii), now);
+                }
+            }
+            self.save_now(now_unix);
+        }
+    }
+
+    pub fn tutorial_acknowledge(&mut self, now_unix: u64) {
+        if self.tutorial_offline_step() {
+            self.engine.tutorial_acknowledge();
+            self.save_now(now_unix);
+        }
+    }
+
+    fn skip_tutorial(&mut self, now_unix: u64) {
+        self.confirm_tutorial_skip = false;
+        if self.tutorial_active() {
+            self.engine.tutorial_skip();
+            self.tutorial_finished = true;
+            self.save_now(now_unix);
+        }
+    }
+
+    fn replay_tutorial(&mut self, now_unix: u64) {
+        self.engine.tutorial_replay();
+        self.tutorial_step = 0;
+        self.tutorial_finished = false;
+        self.confirm_tutorial_replay = false;
+        self.confirm_tutorial_skip = false;
+        self.save_now(now_unix);
+    }
+
+    fn tutorial_system_action(&mut self, now_unix: u64) {
+        if self.demo {
+            self.notice = Some("Demo: tutorial is disabled.".to_owned());
+            return;
+        }
+        if self.tutorial_active() {
+            self.replay_tutorial(now_unix);
+        } else if self.engine.view().descents() == 0 {
+            self.confirm_tutorial_replay = true;
+        } else {
+            self.notice = Some("Start a new save to replay the tutorial.".to_owned());
+        }
+    }
+
     fn switch_tab(&mut self, tab: Tab) {
+        let entering_system = tab == Tab::System && self.current != ScreenKind::System;
         match tab {
             Tab::Sonar => {
                 self.current = ScreenKind::Sonar;
@@ -775,6 +907,9 @@ impl Session {
         self.confirm_descent = false;
         self.notice = None;
         self.hovered_generator = None;
+        if entering_system && self.tutorial_active() {
+            self.record_tutorial_ui(TutorialUiEvent::SystemOpened);
+        }
     }
 
     fn cycle_tab(&mut self, direction: isize) {
@@ -876,7 +1011,7 @@ impl Session {
             Focus::System(index) => index,
             _ => 0,
         };
-        let next = (index as isize + delta).clamp(0, 9) as usize;
+        let next = (index as isize + delta).clamp(0, 10) as usize;
         self.focus = Focus::System(next);
     }
 
@@ -973,6 +1108,7 @@ impl Session {
                 self.bell = !self.bell;
                 self.apply_setting();
             }
+            10 => self.tutorial_system_action(now_unix),
             6..=9 => {
                 let id = GeneratorId::ALL[index - 6];
                 let enabled = !self.engine.view().auto_buy(id);
@@ -1359,7 +1495,6 @@ impl Session {
                 self.hovered_generator = None;
                 self.last_save_unix = Some(now_unix);
                 self.save_error = None;
-                self.briefing = false;
                 Ok(())
             }
             Err(err) => Err(err.to_string()),
@@ -1405,7 +1540,6 @@ impl Session {
         self.anim = AnimState::new(self.engine.view().echo());
         self.last_save_unix = None;
         self.boot = Boot::New { started: now };
-        self.briefing = true;
         self.save_now(now_unix);
         Ok(())
     }
@@ -1548,19 +1682,32 @@ impl App {
                 } else if !self.session.boot_done(now) {
                     self.session.skip_boot();
                     self.dirty = true;
-                } else if self.session.briefing {
-                    if key.code == KeyCode::Char('?') {
-                        self.session.briefing = false;
-                        self.session.help = true;
-                        self.session.help_scroll = 0;
-                    } else {
-                        self.session.briefing = false;
+                } else if self.session.confirm_tutorial_skip {
+                    match key.code {
+                        KeyCode::Char('y') => self.session.skip_tutorial(now_unix()),
+                        KeyCode::Char('n') | KeyCode::Esc => {
+                            self.session.confirm_tutorial_skip = false;
+                        }
+                        _ => {}
+                    }
+                    self.dirty = true;
+                } else if self.session.confirm_tutorial_replay {
+                    match key.code {
+                        KeyCode::Char('y') => self.session.replay_tutorial(now_unix()),
+                        KeyCode::Char('n') | KeyCode::Esc => {
+                            self.session.confirm_tutorial_replay = false;
+                        }
+                        _ => {}
                     }
                     self.dirty = true;
                 } else if self.session.help {
                     let page = self.session.help_visible.saturating_sub(1).max(1) as isize;
                     match key.code {
-                        KeyCode::Esc => self.session.help = false,
+                        KeyCode::Esc => {
+                            self.session.help = false;
+                            self.session
+                                .record_tutorial_ui(TutorialUiEvent::ManualClosed);
+                        }
                         KeyCode::Up => self.session.scroll_help(-1),
                         KeyCode::Down => self.session.scroll_help(1),
                         KeyCode::PageUp => self.session.scroll_help(-page),
@@ -1578,6 +1725,9 @@ impl App {
                     && !matches!(key.code, KeyCode::Char('y') | KeyCode::Esc)
                 {
                     // The confirmation owns the keyboard.
+                } else if key.code == KeyCode::Enter && self.session.tutorial_offline_step() {
+                    self.session.tutorial_acknowledge(now_unix());
+                    self.dirty = true;
                 } else if let Some(command) = map_key(key, Mode::Normal) {
                     let logical_ms = self.session.started_at.elapsed().as_millis() as u64;
                     if self.queue.push(command, logical_ms) {
@@ -1591,7 +1741,6 @@ impl App {
                         && self.session.boot_done(now)
                         && self.session.dive.is_none()
                         && !self.session.help
-                        && !self.session.briefing
                         && self.session.edit.is_none()
                         && !self.session.confirm_descent
                         && !self.session.offline_visible
@@ -1712,6 +1861,8 @@ impl App {
             }
         }
 
+        self.session.sync_tutorial(now, now_unix());
+
         if self.session.bell && self.session.bell_once {
             ring();
             self.session.bell_once = false;
@@ -1770,6 +1921,9 @@ impl App {
                 help_scroll: self.session.help_scroll,
                 demo: self.session.demo,
                 hovered: self.session.hovered_generator,
+                tutorial: Some(self.session.engine.tutorial()),
+                confirm_skip: self.session.confirm_tutorial_skip,
+                confirm_replay: self.session.confirm_tutorial_replay,
             };
             terminal.draw(|frame| {
                 hits = render(frame, &ui);
@@ -1878,7 +2032,7 @@ mod tests {
         let anim = AnimState::new(engine.view().echo());
         let palette = Palette::resolve(Theme::Abyss, ColorDepth::Auto);
         let save_path = sanitize(&SavePaths::new(&dir).save().display().to_string());
-        Session {
+        let mut session = Session {
             engine,
             ascii: false,
             mouse: false,
@@ -1914,11 +2068,14 @@ mod tests {
             archive_visible: 0,
             edit: None,
             help: false,
-            briefing: false,
             help_scroll: 0,
             help_total: 0,
             help_visible: 0,
             hovered_generator: None,
+            tutorial_step: 0,
+            tutorial_finished: false,
+            confirm_tutorial_skip: false,
+            confirm_tutorial_replay: false,
             last_save_unix: None,
             last_hull_click: None,
             bell_once: false,
@@ -1928,7 +2085,11 @@ mod tests {
             last_purchase_toast: None,
             store,
             _lock: None,
-        }
+        };
+        let tutorial = session.engine.tutorial();
+        session.tutorial_step = tutorial.index;
+        session.tutorial_finished = tutorial.completed || tutorial.skipped;
+        session
     }
 
     fn demo_with(mutate: impl FnOnce(&mut serde_json::Value)) -> Engine {
@@ -1949,7 +2110,8 @@ mod tests {
         assert!(session.save_now(2_000));
         assert!(!SavePaths::new(dir.path()).save().exists());
         assert_eq!(session.engine.view().hull_count(), 15);
-        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+        assert_eq!(session.screen(Instant::now()), Screen::Sonar);
+        assert!(session.engine.tutorial().completed);
         let _ = session.apply_command(Command::Pulse, 2_000);
     }
 
@@ -2561,12 +2723,10 @@ mod tests {
         assert!(h.text().contains("RELAY K-9"), "boot frame: {}", h.text());
         h.key(KeyCode::Char('x'));
         assert!(h.app.session.boot_done(h.now));
-        assert!(matches!(h.app.session.screen(h.now), Screen::Briefing));
-        h.key(KeyCode::Char('x'));
-        assert!(!h.app.session.briefing);
         h.render();
         assert!(h.text().contains("SONAR"), "sonar frame: {}", h.text());
-        eprintln!("step 0: boot skipped, briefing dismissed");
+        assert_eq!(h.app.session.engine.tutorial().index, 0);
+        eprintln!("step 0: boot skipped");
 
         // Pulse.
         h.key(KeyCode::Char(' '));
@@ -3078,6 +3238,219 @@ mod tests {
         );
     }
 
+    fn tutorial_engine(step: u8, descents: u32) -> Engine {
+        demo_with(|value| {
+            value["meta"]["tutorial"] = serde_json::json!({
+                "step": step,
+                "completed": false,
+                "skipped": false,
+                "seen_carrier_change": true,
+                "tuned_since_change": true,
+                "manual_opened": false,
+                "manual_closed": false,
+                "system_opened": false,
+                "acknowledged": false,
+            });
+            value["meta"]["stats"]["descents"] = serde_json::json!(descents);
+        })
+    }
+
+    #[test]
+    fn tutorial_coaches_new_save_and_resumes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let start = Instant::now();
+        let session = Session::start(&opts, now_unix()).expect("new save");
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.render();
+        let text = h.text();
+        assert!(text.contains("TUTORIAL 01/13"), "{text}");
+        assert!(text.contains("▶ PULSE"), "pulse highlight: {text}");
+        assert!(!text.contains("FIRST RUN"), "briefing must be gone");
+
+        h.key(KeyCode::Char(' '));
+        assert_eq!(h.app.session.engine.tutorial().index, 1);
+        assert!(
+            h.app
+                .session
+                .toasts
+                .iter()
+                .any(|toast| toast.contains("pulse received"))
+        );
+        h.render();
+        assert!(h.text().contains("TUTORIAL 02/13"));
+
+        h.key(KeyCode::Char('h'));
+        assert_eq!(h.view().generator_owned(GeneratorId::Hydrophone), 1);
+        assert_eq!(h.view().echo(), Decimal::ZERO);
+        assert_eq!(h.app.session.engine.tutorial().index, 2);
+        h.render();
+        assert!(h.text().contains("TUTORIAL 03/13"));
+        drop(h);
+
+        let session = Session::start(&opts, now_unix() + 1).expect("reload");
+        assert_eq!(session.engine.tutorial().index, 2);
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.render();
+        assert!(h.text().contains("TUTORIAL 03/13"), "{}", h.text());
+    }
+
+    #[test]
+    fn tutorial_skip_persists_and_system_replay_restarts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let start = Instant::now();
+        let session = Session::start(&opts, now_unix()).expect("new save");
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char('S'));
+        assert!(h.app.session.confirm_tutorial_skip);
+        h.render();
+        assert!(h.text().contains("SKIP TUTORIAL?"), "{}", h.text());
+        h.key(KeyCode::Char('y'));
+        assert!(h.app.session.engine.tutorial().skipped);
+        assert!(!h.app.session.confirm_tutorial_skip);
+        h.render();
+        assert!(!h.text().contains("TUTORIAL 01/13"));
+        drop(h);
+
+        let session = Session::start(&opts, now_unix() + 1).expect("reload");
+        assert!(session.engine.tutorial().skipped);
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.render();
+        assert!(!h.text().contains("TUTORIAL 01/13"));
+
+        h.key(KeyCode::Char('4'));
+        for _ in 0..10 {
+            h.key(KeyCode::Down);
+        }
+        assert_eq!(h.app.session.focus, Focus::System(10));
+        h.key(KeyCode::Enter);
+        assert!(h.app.session.confirm_tutorial_replay);
+        h.render();
+        assert!(h.text().contains("REPLAY TUTORIAL?"), "{}", h.text());
+        h.key(KeyCode::Char('y'));
+        assert_eq!(h.app.session.engine.tutorial().index, 0);
+        assert!(!h.app.session.engine.tutorial().skipped);
+        h.render();
+        assert!(h.text().contains("TUTORIAL 01/13"));
+    }
+
+    #[test]
+    fn tutorial_active_system_replay_is_immediate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let start = Instant::now();
+        let session = Session::start(&opts, now_unix()).expect("new save");
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char(' '));
+        h.key(KeyCode::Char('h'));
+        assert_eq!(h.app.session.engine.tutorial().index, 2);
+        h.key(KeyCode::Char('4'));
+        for _ in 0..10 {
+            h.key(KeyCode::Down);
+        }
+        h.key(KeyCode::Enter);
+        assert!(!h.app.session.confirm_tutorial_replay);
+        assert_eq!(h.app.session.engine.tutorial().index, 0);
+    }
+
+    #[test]
+    fn tutorial_replay_refused_after_first_descent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let mut engine = tutorial_engine(12, 1);
+        engine.tutorial_acknowledge();
+        let tutorial = engine.tutorial();
+        assert!(tutorial.completed);
+        let mut store = SaveStore::new(dir.path());
+        store.save(engine.state(), now_unix()).expect("seed");
+        drop(store);
+
+        let session = Session::start(&opts, now_unix()).expect("load");
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char('4'));
+        for _ in 0..10 {
+            h.key(KeyCode::Down);
+        }
+        h.key(KeyCode::Enter);
+        assert!(!h.app.session.confirm_tutorial_replay);
+        assert!(
+            h.app
+                .session
+                .notice
+                .as_deref()
+                .unwrap_or("")
+                .contains("Start a new save to replay the tutorial."),
+            "{:?}",
+            h.app.session.notice
+        );
+    }
+
+    #[test]
+    fn tutorial_demo_has_no_coach() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut opts = options(dir.path());
+        opts.demo = true;
+        let session = Session::start(&opts, 1_000).expect("demo");
+        assert!(session.engine.tutorial().completed);
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.render();
+        assert!(!h.text().contains("TUTORIAL 01/13"), "{}", h.text());
+        assert!(h.text().contains("DEMO // NOTHING IS SAVED"));
+    }
+
+    #[test]
+    fn tutorial_ui_events_complete_steps_10_11_and_12() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let engine = tutorial_engine(10, 0);
+        let mut store = SaveStore::new(dir.path());
+        store.save(engine.state(), now_unix()).expect("seed");
+        drop(store);
+
+        let session = Session::start(&opts, now_unix()).expect("load");
+        let start = Instant::now();
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        assert_eq!(h.app.session.engine.tutorial().index, 10);
+
+        h.key(KeyCode::Char('4'));
+        assert_eq!(h.app.session.engine.tutorial().index, 11);
+        h.render();
+        assert!(h.text().contains("TUTORIAL 12/13"), "{}", h.text());
+
+        h.key(KeyCode::Char('?'));
+        assert!(h.app.session.help);
+        h.key(KeyCode::Esc);
+        assert!(!h.app.session.help);
+        assert_eq!(h.app.session.engine.tutorial().index, 12);
+        h.render();
+        assert!(h.text().contains("TUTORIAL 13/13"), "{}", h.text());
+
+        h.key(KeyCode::Enter);
+        assert!(h.app.session.engine.tutorial().completed);
+        assert!(
+            h.app
+                .session
+                .toasts
+                .iter()
+                .any(|toast| toast.contains("TUTORIAL COMPLETE"))
+        );
+        h.key(KeyCode::Char('1'));
+        h.render();
+        assert!(!h.text().contains("TUTORIAL 13/13"));
+    }
+
     #[test]
     fn nested_nonexistent_data_dir_starts_fresh() {
         let root = tempfile::tempdir().expect("tempdir");
@@ -3088,11 +3461,11 @@ mod tests {
         assert_eq!(session.engine.view().descents(), 0);
         assert_eq!(session.engine.view().hull_count(), 0);
         assert!(matches!(session.boot, Boot::New { .. }));
-        assert!(session.briefing);
         assert!(session.banner().is_none(), "{:?}", session.banner());
         assert!(!session.banner().unwrap_or("").contains("lock i/o error"));
         session.skip_boot();
-        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+        assert_eq!(session.screen(Instant::now()), Screen::Sonar);
+        assert_eq!(session.engine.tutorial().index, 0);
         assert!(
             SavePaths::new(&nested).save().exists(),
             "immediate save in the new directory"
@@ -3106,11 +3479,11 @@ mod tests {
         fs::create_dir(&empty).expect("empty dir");
         let mut session = Session::start(&options(&empty), 1_000).expect("empty start");
         assert!(matches!(session.boot, Boot::New { .. }));
-        assert!(session.briefing);
         assert_eq!(session.engine.view().descents(), 0);
         assert!(session.banner().is_none(), "{:?}", session.banner());
         session.skip_boot();
-        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+        assert_eq!(session.screen(Instant::now()), Screen::Sonar);
+        assert_eq!(session.engine.tutorial().index, 0);
     }
 
     #[test]
@@ -3129,8 +3502,8 @@ mod tests {
         assert!(!SavePaths::new(&demo_dir).save().exists());
         assert_eq!(session.engine.view().hull_count(), 15);
         assert!(matches!(session.boot, Boot::Done));
-        assert!(session.briefing);
-        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+        assert!(session.engine.tutorial().completed);
+        assert_eq!(session.screen(Instant::now()), Screen::Sonar);
     }
 
     #[test]
@@ -3200,96 +3573,6 @@ mod tests {
     }
 
     #[test]
-    fn briefing_shows_for_new_save_and_demo_only() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let opts = options(dir.path());
-        let mut fresh = Session::start(&opts, 1_000).expect("fresh");
-        assert!(fresh.briefing);
-        fresh.skip_boot();
-        assert_eq!(fresh.screen(Instant::now()), Screen::Briefing);
-        drop(fresh);
-
-        let mut loaded = Session::start(&opts, 1_001).expect("loaded");
-        assert!(!loaded.briefing);
-        loaded.skip_boot();
-        assert_eq!(loaded.screen(Instant::now()), Screen::Sonar);
-        drop(loaded);
-
-        let mut demo_opts = opts.clone();
-        demo_opts.demo = true;
-        let demo = Session::start(&demo_opts, 1_002).expect("demo");
-        assert!(demo.briefing);
-        assert_eq!(demo.screen(Instant::now()), Screen::Briefing);
-    }
-
-    #[test]
-    fn briefing_any_key_dismisses_and_question_opens_help() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let opts = options(dir.path());
-        let session = Session::start(&opts, 1_000).expect("fresh");
-        let start = Instant::now();
-        let mut h = Harness::new(App::new_at(session, start), start);
-        h.key(KeyCode::Char('x')); // skip boot
-        assert!(h.app.session.briefing);
-        h.render();
-        let text = h.text();
-        assert!(
-            text.contains("OPERATOR 7 // RELAY K-9 // 7,912 M"),
-            "{text}"
-        );
-        assert!(text.contains("The station is dead. The trench is not."));
-        h.key(KeyCode::Char('x'));
-        assert!(!h.app.session.briefing);
-        h.render();
-        assert!(h.text().contains("SONAR"));
-        drop(h);
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let opts = options(dir.path());
-        let session = Session::start(&opts, 1_000).expect("fresh");
-        let start = Instant::now();
-        let mut h = Harness::new(App::new_at(session, start), start);
-        h.key(KeyCode::Char('x'));
-        assert!(h.app.session.briefing);
-        h.key(KeyCode::Char('?'));
-        assert!(!h.app.session.briefing);
-        assert!(h.app.session.help);
-        h.render();
-        assert!(h.text().contains("BASICS"));
-        h.key(KeyCode::Esc);
-        assert!(!h.app.session.help);
-        h.render();
-        assert!(h.text().contains("SONAR"));
-    }
-
-    #[test]
-    fn help_scroll_clamps_both_ends() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut session = headless(Engine::new(), dir.path().to_path_buf(), None);
-        session.help = true;
-        let start = Instant::now();
-        let mut app = App::new_at(session, start);
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
-        app.render(&mut terminal, start).expect("render");
-        let total = app.session.help_total;
-        let visible = app.session.help_visible;
-        assert!(total > visible);
-
-        for _ in 0..50 {
-            app.session.apply_command(Command::PageDown, 1_000);
-        }
-        assert_eq!(app.session.help_scroll, total - visible);
-        for _ in 0..100 {
-            app.session.apply_command(Command::FocusPrev, 1_000);
-        }
-        assert_eq!(app.session.help_scroll, 0);
-        for _ in 0..50 {
-            app.session.apply_command(Command::PageDown, 1_000);
-        }
-        assert_eq!(app.session.help_scroll, total - visible);
-    }
-
-    #[test]
     fn unknown_config_fields_are_ignored() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = SavePaths::new(dir.path()).config();
@@ -3328,7 +3611,6 @@ mod tests {
         let start = Instant::now();
         let session = Session::start(&opts, 1_000).expect("fresh");
         let mut first = Harness::new(App::new_at(session, start), start);
-        first.key(KeyCode::Char('x'));
         first.key(KeyCode::Char('x'));
         first.key(KeyCode::Char('4'));
         for _ in 0..7 {
@@ -3392,7 +3674,6 @@ mod tests {
         // Save at the real clock so the reload is not a huge offline gap.
         let session = Session::start(&opts, now_unix()).expect("start");
         let mut h = Harness::new(App::new_at(session, start), start);
-        h.key(KeyCode::Char('x'));
         h.key(KeyCode::Char('x'));
         h.key(KeyCode::Char('4'));
         for _ in 0..4 {

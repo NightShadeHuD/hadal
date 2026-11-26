@@ -11,6 +11,7 @@ use crate::glyphs;
 use crate::model;
 use crate::render::{
     HitMap, UiState, count, fit_tail, render_rule, render_tabs, save_age, titled_frame,
+    window_start,
 };
 use crate::theme::Palette;
 
@@ -92,6 +93,13 @@ fn settings_rows(ui: &UiState<'_>, width: usize) -> Vec<SystemRow> {
             on_off(ui.view.auto_buy(*id)),
         );
     }
+    let tutorial = match ui.tutorial {
+        Some(view) if view.completed => "COMPLETE".to_owned(),
+        Some(view) if view.skipped => "SKIPPED".to_owned(),
+        Some(view) => format!("STEP {}/13", view.index.saturating_add(1)),
+        None => "UNAVAILABLE".to_owned(),
+    };
+    push_setting(&mut rows, 10, "TUTORIAL".to_owned(), &tutorial);
     for line in hull_summary(ui, width) {
         rows.push(SystemRow {
             text: line,
@@ -206,26 +214,40 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         Rect::new(inner.x, inner.y, inner.width, 1),
         &p,
         ui.screen.tab(),
+        crate::render::coach::target_tab(ui),
+        ui.ascii,
     );
     let content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
+    let coach = if ui.coach_active() {
+        crate::render::coach::HEIGHT
+    } else {
+        0
+    };
     let rows = Layout::vertical([
-        Constraint::Min(0),    // settings + automation
-        Constraint::Length(1), // rule
-        Constraint::Length(3), // save block
-        Constraint::Length(1), // version/credits
-        Constraint::Length(1), // controls
+        Constraint::Min(0),        // settings + automation
+        Constraint::Length(1),     // rule
+        Constraint::Length(3),     // save block
+        Constraint::Length(1),     // version/credits
+        Constraint::Length(coach), // reserved coach
+        Constraint::Length(1),     // controls
     ])
-    .areas::<5>(content);
-    let (body, rule, save_area, version_area, controls_area) =
-        (rows[0], rows[1], rows[2], rows[3], rows[4]);
+    .areas::<6>(content);
+    let (body, rule, save_area, version_area, _coach_area, controls_area) =
+        (rows[0], rows[1], rows[2], rows[3], rows[4], rows[5]);
 
     let focus_index = match ui.focus {
         crate::render::Focus::System(index) => Some(index),
         _ => None,
     };
     let all = settings_rows(ui, body.width as usize);
+    let focus_pos =
+        focus_index.and_then(|index| all.iter().position(|row| row.focus == Some(index)));
+    let visible = body.height as usize;
+    let start = window_start(all.len(), visible, focus_pos);
     let lines: Vec<Line> = all
         .iter()
+        .skip(start)
+        .take(visible)
         .map(|row| styled_setting(row, focus_index, p))
         .collect();
     frame.render_widget(Paragraph::new(lines), body);
@@ -235,10 +257,7 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         ..HitMap::default()
     };
     let mut y = body.y;
-    for row in &all {
-        if y >= body.y.saturating_add(body.height) {
-            break;
-        }
+    for row in all.iter().skip(start).take(visible) {
         if let Some(index) = row.focus {
             hits.system
                 .push((Rect::new(body.x, y, body.width, 1), index));
@@ -291,16 +310,25 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         version_area,
     );
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            format!(
-                "CONTROLS  {}{} focus   Enter/Space change   t toggle   Esc back",
-                g.arrow_up, g.arrow_down
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(
+                    "CONTROLS  {}{} focus  Enter change  t toggle  Esc back  ",
+                    g.arrow_up, g.arrow_down
+                ),
+                dim(p),
             ),
-            dim(p),
-        ))),
+            crate::render::coach::help_span(ui, p),
+        ])),
         controls_area,
     );
 
+    hits.tutorial_target = match ui.coach_target() {
+        Some(crate::render::TutorialTarget::HelpKey) => Some(controls_area),
+        _ => hits.tabs.iter().find_map(|(rect, tab)| {
+            (Some(*tab) == crate::render::coach::target_tab(ui)).then_some(*rect)
+        }),
+    };
     hits
 }
 
@@ -354,7 +382,7 @@ mod tests {
         let ui = make_ui(&engine, &anim);
         let rows = settings_rows(&ui, 78);
         let focused: Vec<usize> = rows.iter().filter_map(|row| row.focus).collect();
-        assert_eq!(focused, (0..10).collect::<Vec<_>>());
+        assert_eq!(focused, (0..11).collect::<Vec<_>>());
         let joined = rows
             .iter()
             .map(|row| row.text.as_str())
@@ -371,6 +399,7 @@ mod tests {
             "AUTO-BUY Drifter",
             "AUTO-BUY Sonar Mast",
             "AUTO-BUY Tidal Core",
+            "TUTORIAL",
         ] {
             assert!(joined.contains(label), "missing {label}");
         }

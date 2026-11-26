@@ -4,31 +4,31 @@ expression: "draw(100, 30, &ui)"
 ---
 ┌ HADAL ── ARCHIVE ────────────────────────────────────────────────────── LOGS 10/10  ── ACH 10/11 ┐
 │ 1 SONAR   2 DESCENT  [3 ARCHIVE]  4 SYSTEM                                                       │
-│LOGS                                                                                              │
-│[01] You wake the console. The trench is already speaking.                                        │
-│[02] A pulse leaves the hull. Something answers it with the same shape.                           │
-│[03] The first hydrophone lowers into the dark and begins to drink the carrier.                   │
-│[04] The carrier holds a band long enough to be a word. You write it down.                        │
-│[05] BALLAST RELEASED. K-9 SINKS THROUGH ITS OWN SHADOW.                                          │
-│[06] NINE THOUSAND METRES. The pressure writes on the hull in a language you almost read.         │
-│[07] THE SIGNAL IS NO LONGER A SINGLE VOICE.                                                      │
-│[08] A HUNDRED FATHOMS. Voss would have stopped here. You do not.                                 │
-│[09] Every band has been tuned. The carrier is not a distress call. It is a rehearsal.            │
-│[10] The station pulses without you now. It has learned the rhythm.                               │
-│ACHIEVEMENTS   each unlocked grants +1% output                                                    │
-│[x] First Contact        UNLOCKED                                                                 │
-│    Fire a manual pulse.                                                                          │
-│[x] Hydrophile           UNLOCKED                                                                 │
-│    Own a Hydrophone.                                                                             │
-│[x] Chorus               UNLOCKED                                                                 │
-│    Own 50 Hydrophones.                                                                           │
-│[x] Drifter              UNLOCKED                                                                 │
-│    Own a Drifter.                                                                                │
-│[x] Mast                 UNLOCKED                                                                 │
-│    Own a Sonar Mast.                                                                             │
-│[x] Core                 UNLOCKED                                                                 │
-│    Own a Tidal Core.                                                                             │
-│[x] First Descent        UNLOCKED                                                                 │
+│  LOGS                                                                                            │
+│  [01] You wake the console. The trench is already speaking.                                      │
+│  [02] A pulse leaves the hull. Something answers it with the same shape.                         │
+│  [03] The first hydrophone lowers into the dark and begins to drink the carrier.                 │
+│  [04] The carrier holds a band long enough to be a word. You write it down.                      │
+│  [05] BALLAST RELEASED. K-9 SINKS THROUGH ITS OWN SHADOW.                                        │
+│  [06] NINE THOUSAND METRES. The pressure writes on the hull in a language you almost read.       │
+│  [07] THE SIGNAL IS NO LONGER A SINGLE VOICE.                                                    │
+│  [08] A HUNDRED FATHOMS. Voss would have stopped here. You do not.                               │
+│  [09] Every band has been tuned. The carrier is not a distress call. It is a rehearsal.          │
+│  [10] The station pulses without you now. It has learned the rhythm.                             │
+│  ACHIEVEMENTS   each unlocked grants +1% output                                                  │
+│  [x] First Contact        UNLOCKED                                                               │
+│      Fire a manual pulse.                                                                        │
+│  [x] Hydrophile           UNLOCKED                                                               │
+│      Own a Hydrophone.                                                                           │
+│  [x] Chorus               UNLOCKED                                                               │
+│      Own 50 Hydrophones.                                                                         │
+│  [x] Drifter              UNLOCKED                                                               │
+│      Own a Drifter.                                                                              │
+│  [x] Mast                 UNLOCKED                                                               │
+│      Own a Sonar Mast.                                                                           │
+│  [x] Core                 UNLOCKED                                                               │
+│      Own a Tidal Core.                                                                           │
+│  [x] First Descent        UNLOCKED                                                               │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│↑ ↓ scroll   PgUp/PgDn page   Esc back   0-25/45                                                  │
+│↑ ↓ scroll  PgUp/PgDn page  Esc back  0-25/45  ? manual                                           │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

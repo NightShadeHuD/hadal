@@ -74,6 +74,8 @@ pub enum Command {
     StartImport,
     /// Open the reset (DISCARD) overlay.
     StartReset,
+    /// Open the tutorial skip confirmation.
+    TutorialSkip,
     /// Toggle the focused toggle row.
     ToggleFocused,
     /// Mouse: focus and buy an upgrade row by index.
@@ -137,6 +139,7 @@ fn map_normal(key: KeyEvent) -> Option<Command> {
         KeyCode::Char('y') => Some(Command::ConfirmDescent),
         KeyCode::Char('u') => Some(Command::FocusUpgrades),
         KeyCode::Char('s') => Some(Command::Save),
+        KeyCode::Char('S') => Some(Command::TutorialSkip),
         KeyCode::Char('t') => Some(Command::ToggleFocused),
         KeyCode::Char('e') => Some(Command::StartExport),
         KeyCode::Char('i') => Some(Command::StartImport),
@@ -319,6 +322,7 @@ mod tests {
     fn maps_system_and_text_entry_keys() {
         let cases = [
             (KeyCode::Char('s'), Command::Save),
+            (KeyCode::Char('S'), Command::TutorialSkip),
             (KeyCode::Char('t'), Command::ToggleFocused),
             (KeyCode::Char('e'), Command::StartExport),
             (KeyCode::Char('i'), Command::StartImport),

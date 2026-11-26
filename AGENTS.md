@@ -1,6 +1,6 @@
 # HADAL — Engineering Laws
 
-Twelve laws govern every change. Read this file before editing anything.
+Thirteen laws govern every change. Read this file before editing anything.
 
 ## 1. Architecture boundary
 
@@ -59,7 +59,7 @@ No wall clock, RNG, filesystem, environment, or UI input inside `tick()`.
 
 ## 4. Save law
 
-Schema **v1**. Envelope fields, in canonical file order: `format`, `schema_version`,
+Schema **v2**. Envelope fields, in canonical file order: `format`, `schema_version`,
 `app_version`, `saved_at_unix`, `save_counter`, `checksum`, `state`.
 
 - **Checksum** — SHA-256 over the canonical compact JSON of the envelope minus `checksum`
@@ -78,9 +78,9 @@ Schema **v1**. Envelope fields, in canonical file order: `format`, `schema_versi
   is refused (`NewerSaveOnDisk`); an older save never clobbers a newer one.
 - **Lock** — one advisory lock on `save.lock` via `File::try_lock`; a second instance
   exits cleanly (`WouldBlock` → `AlreadyRunning`). Released on drop.
-- **Migrations** — a synthetic 0→1 step is the test injection point; production v1 ships
-  an empty chain. Every future state change bumps the schema, adds a migration step and a
-  fixture.
+- **Migrations** — production ships a real `1 -> 2` step that inserts a completed tutorial
+  into existing saves; a synthetic 0→1 step remains the test injection point. Every schema
+  change bumps the version, adds a migration step and a fixture.
 - **Config** — `config.json` (theme, reduce motion, ASCII, mouse, color depth, bell) is
   separate, unchecksummed, forward-compatible, and never deleted on parse failure.
 
@@ -99,7 +99,21 @@ manual actions are credited. `elapsed = max(0, now_unix - saved_at_unix)`;
 - Equivalence: the same state and automation over the same duration must yield an
   identical state hash online and offline (pinned in the pacing test).
 
-## 6. Testing law
+## 6. Tutorial law
+
+- **Single table.** Copy, order, targets and completion kinds live in one table,
+  `crates/hadal-core/src/content/tutorial.rs`.
+- **Persisted, production-neutral.** Progress is `MetaState::tutorial` (`TutorialState`) saved
+  with the game; it never changes production, costs or prestige, and advances deterministically
+  from player actions.
+- **Engine-driven.** Steps advance by an observe-on-tick/apply predicate (capped at 16 per
+  call); UI-only steps go through `Engine::tutorial_ui`, completion is
+  `Engine::tutorial_acknowledge`, and `tutorial_skip`/`tutorial_replay` are the only other
+  transitions. Replay is allowed only before the first Descent.
+- **Tested per step.** Every step has a predicate test; skip/replay and persistence have
+  tests; the v1→v2 fixture proves existing saves are marked complete.
+
+## 7. Testing law
 
 | Tier | Coverage |
 |---|---|
@@ -110,9 +124,9 @@ manual actions are credited. `elapsed = max(0, now_unix - saved_at_unix)`;
 | TUI | insta goldens at 80×24, 100×30, 140×40; overlays; boot; mono/ASCII; keymap; too-small; terminal restore; E2E session; resize storm |
 | CI | fmt, clippy `-D warnings`, tests, pacing, MSRV, `cargo-deny`, release builds |
 
-Measured counts: core **194**, TUI **167**, sim **8**, and the release pacing test **1** — total
-**370**. `tools/test-floor.txt` currently reads `247`; the floor may only rise, and the infra
-worker raises it to the measured **370** (the gate refuses a count below the floor). Every new
+Measured counts: core **208**, TUI **182**, sim **8**, and the release pacing test **1** — total
+**399**. `tools/test-floor.txt` currently reads `247`; the floor may only rise, and the infra
+worker raises it to the measured **399** (the gate refuses a count below the floor). Every new
 mechanic gets a unit test; every save change gets a round-trip and a migration fixture;
 every UI change updates its goldens. Pacing is a release-mode integration test, not an
 `#[ignore]`d manual script. No tautologies or source-text assertions.
@@ -120,7 +134,7 @@ every UI change updates its goldens. Pacing is a release-mode integration test, 
 `cargo mutants --in-diff <diff-file>` is the per-change test-strength check (install pending
 owner approval; the check prints `SKIPPED` loudly until then).
 
-## 7. Content law
+## 8. Content law
 
 One table source of truth: `crates/hadal-core/src/content/tables.rs`. 4 generators, 8
 Signal Chain upgrades, 17 hulls, 11 achievements, 10 logs. The **final** hull costs end at
@@ -129,7 +143,7 @@ the top of the tree was reached too early). Content IDs are stable strings; new 
 append and never rename (a rename needs a migration). Every unlock has a test; there are no
 dead upgrades.
 
-## 8. UX law
+## 9. UX law
 
 - Minimum layout **80×24**; below that render only a clear too-small screen — no partial
   layout, no panic.
@@ -141,7 +155,7 @@ dead upgrades.
   available and change presentation only, never information.
 - Contrast: body text ≥ 4.5:1, large numerals ≥ 3:1, both enforced by tests.
 
-## 9. Pre-commit and the gate
+## 10. Pre-commit and the gate
 
 Before every commit: read the full diff against this file; confirm every new public
 behaviour has a test; confirm no `f64` state, no wall clock/RNG/UI in core, no TODOs/stubs/
@@ -150,13 +164,13 @@ pacing, content-digest receipt). The gate writes a **receipt v2** anchored to a 
 the working-tree file contents; `cargo xtask gate-status` verifies the receipt still matches
 the tree and exits non-zero on a stale receipt. No WIP commits, no generated artifacts.
 
-## 10. Git
+## 11. Git
 
 Conventional atomic commits, one behaviour per commit. `main` is always green. Never
 force-push. Release tags (`v*`) are created only after `cargo xtask gate` passes. Add a
 remote only when a URL is supplied; never fabricate one.
 
-## 11. Performance budgets
+## 12. Performance budgets
 
 Measured on Windows (release, thin LTO, stripped symbols):
 
@@ -175,13 +189,13 @@ Reproduce with `cargo test -p hadal --release --bins measurement -- --nocapture`
 `cargo run -p hadal-sim --release -- --profile active --hours 1,24,72 --assert`, and
 `cargo run -p hadal-sim --release -- --profile offline --hours 168 --assert`.
 
-## 12. Definition of done
+## 13. Definition of done
 
 - `cargo xtask gate` passes (fmt, clippy, tests, floor, pacing, receipt).
 - Pacing bands in `docs/BALANCE.md` are met for `active`, `idle` and `offline`.
 - Manual playthrough: pulse → buy → tune → first Descent → hull → save → quit → relaunch →
   offline summary.
-- Goldens approved (27); no unverified claims in docs (CI verifies Ubuntu, Windows and macOS;
+- Goldens approved (34); no unverified claims in docs (CI verifies Ubuntu, Windows and macOS;
   release artifacts are not claimed until a tag is cut).
 - No `f64` state, no transcendental functions in simulation, no wall clock/RNG in core.
 

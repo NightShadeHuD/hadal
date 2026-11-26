@@ -7,6 +7,8 @@
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::state::TutorialState;
+
 /// A migration step: transforms an envelope value.
 pub type MigrationStep = fn(Value) -> Result<Value, String>;
 
@@ -38,9 +40,16 @@ pub struct MigrationChain {
 }
 
 impl MigrationChain {
-    /// An empty chain (production ships none for v1).
+    /// An empty chain (used by tests that register their own steps).
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    /// The production migration chain (currently `1 -> 2`).
+    pub fn production() -> Self {
+        let mut chain = Self::default();
+        chain.register(1, 2, migrate_1_to_2);
+        chain
     }
 
     /// Registers a migration step. `to` must be greater than `from`.
@@ -85,4 +94,21 @@ impl MigrationChain {
         }
         Ok(value)
     }
+}
+
+/// Schema 1 -> 2: add a completed tutorial for existing players.
+///
+/// The legacy-safe tutorial default is `completed = true`, so upgraded saves
+/// are never dropped into step 0.
+fn migrate_1_to_2(mut value: Value) -> Result<Value, String> {
+    let meta = value
+        .pointer_mut("/state/meta")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "missing state.meta".to_owned())?;
+    if !meta.contains_key("tutorial") {
+        let tutorial =
+            serde_json::to_value(TutorialState::default()).map_err(|err| err.to_string())?;
+        meta.insert("tutorial".to_owned(), tutorial);
+    }
+    Ok(value)
 }

@@ -1,7 +1,7 @@
 //! Rendering dispatch, shared visual vocabulary, overlays, and too-small screen.
 
 pub mod archive;
-pub mod briefing;
+pub mod coach;
 pub mod descent;
 pub mod dive;
 pub mod help;
@@ -15,7 +15,9 @@ use hadal_core::Decimal;
 use hadal_core::OfflineReport;
 use hadal_core::StateView;
 use hadal_core::content::ids::GeneratorId;
+use hadal_core::content::tutorial::TutorialTarget;
 use hadal_core::decimal::{to_human_ceil, to_human_floor, to_rate};
+use hadal_core::engine::TutorialView;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -43,8 +45,6 @@ pub enum Screen {
         /// Number of boot lines revealed so far.
         revealed: usize,
     },
-    /// The first-run briefing panel.
-    Briefing,
     /// The SONAR console.
     Sonar,
     /// The DESCENT screen.
@@ -69,7 +69,6 @@ impl Screen {
     pub fn tab(self) -> Option<Tab> {
         match self {
             Screen::Sonar | Screen::Boot { .. } | Screen::Dive { .. } => Some(Tab::Sonar),
-            Screen::Briefing => None,
             Screen::Descent => Some(Tab::Descent),
             Screen::Archive => Some(Tab::Archive),
             Screen::System => Some(Tab::System),
@@ -216,6 +215,12 @@ pub struct UiState<'a> {
     pub demo: bool,
     /// Generator row under the mouse, if any (SONAR selection explainer).
     pub hovered: Option<GeneratorId>,
+    /// Core tutorial view, if available.
+    pub tutorial: Option<TutorialView<'a>>,
+    /// The skip-tutorial confirmation is open.
+    pub confirm_skip: bool,
+    /// The replay-tutorial confirmation is open.
+    pub confirm_replay: bool,
 }
 
 impl<'a> UiState<'a> {
@@ -250,6 +255,39 @@ impl<'a> UiState<'a> {
             help_scroll: 0,
             demo: false,
             hovered: None,
+            tutorial: None,
+            confirm_skip: false,
+            confirm_replay: false,
+        }
+    }
+
+    /// True when the coach band should be shown and its targets highlighted.
+    pub fn coach_active(&self) -> bool {
+        if self.help
+            || self.edit.is_some()
+            || self.offline.is_some()
+            || self.confirm_descent
+            || self.confirm_skip
+            || self.confirm_replay
+        {
+            return false;
+        }
+        if !matches!(
+            self.screen,
+            Screen::Sonar | Screen::Descent | Screen::Archive | Screen::System
+        ) {
+            return false;
+        }
+        self.tutorial
+            .is_some_and(|view| !view.completed && !view.skipped)
+    }
+
+    /// The active coach target, if any.
+    pub fn coach_target(&self) -> Option<TutorialTarget> {
+        if self.coach_active() {
+            self.tutorial.map(|view| view.step.target)
+        } else {
+            None
         }
     }
 }
@@ -278,10 +316,6 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
             );
             HitMap::default()
         }
-        Screen::Briefing => {
-            crate::render::briefing::render(frame, ui);
-            HitMap::default()
-        }
         Screen::Sonar => sonar::render(frame, ui),
         Screen::Descent => descent::render(frame, ui),
         Screen::Archive => archive::render(frame, ui),
@@ -296,6 +330,9 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         }
     };
 
+    if ui.coach_active() {
+        coach::render(frame, ui);
+    }
     if let Some(report) = ui.offline {
         render_offline_summary(frame, report, ui.palette, ui.ascii);
     }
@@ -307,10 +344,22 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         hits.help_total = total;
         hits.help_visible = visible;
     }
+    if ui.confirm_skip {
+        coach::render_skip_confirm(frame, ui);
+    }
+    if ui.confirm_replay {
+        coach::render_replay_confirm(frame, ui);
+    }
     render_overlays(frame, ui);
 
     // Modals own the interaction surface; keep help metrics for scroll clamping.
-    if ui.offline.is_some() || ui.edit.is_some() || ui.help || ui.confirm_descent {
+    if ui.offline.is_some()
+        || ui.edit.is_some()
+        || ui.help
+        || ui.confirm_descent
+        || ui.confirm_skip
+        || ui.confirm_replay
+    {
         let total = hits.help_total;
         let visible = hits.help_visible;
         hits = HitMap::default();
@@ -368,6 +417,8 @@ pub fn render_tabs(
     area: Rect,
     palette: &Palette,
     active: Option<Tab>,
+    tutorial: Option<Tab>,
+    ascii: bool,
 ) -> Vec<(Rect, Tab)> {
     const TABS: [(Tab, &str); 4] = [
         (Tab::Sonar, "1 SONAR"),
@@ -379,17 +430,20 @@ pub fn render_tabs(
     let mut x = area.x;
     let end = area.x.saturating_add(area.width);
     for (tab, label) in TABS {
-        let text = if active == Some(tab) {
+        let mut text = if active == Some(tab) {
             format!("[{label}]")
         } else {
             format!(" {label} ")
         };
+        if tutorial == Some(tab) {
+            text = format!("{} {}", coach::marker(ascii), text);
+        }
         let width = text.chars().count() as u16;
         if x.saturating_add(width) > end || area.height == 0 {
             break;
         }
         let rect = Rect::new(x, area.y, width, 1);
-        let style = if active == Some(tab) {
+        let style = if tutorial == Some(tab) || active == Some(tab) {
             Style::new().fg(palette.amber).add_modifier(Modifier::BOLD)
         } else {
             Style::new().fg(palette.dim)

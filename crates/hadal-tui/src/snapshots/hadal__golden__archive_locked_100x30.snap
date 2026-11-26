@@ -4,31 +4,31 @@ expression: "draw(100, 30, &ui)"
 ---
 ┌ HADAL ── ARCHIVE ────────────────────────────────────────────────────── LOGS 10/10  ── ACH 10/11 ┐
 │ 1 SONAR   2 DESCENT  [3 ARCHIVE]  4 SYSTEM                                                       │
-│[x] Mast                 UNLOCKED                                                                 │
-│    Own a Sonar Mast.                                                                             │
-│[x] Core                 UNLOCKED                                                                 │
-│    Own a Tidal Core.                                                                             │
-│[x] First Descent        UNLOCKED                                                                 │
-│    Complete a Descent.                                                                           │
-│[x] Six Deep             UNLOCKED                                                                 │
-│    Complete six Descents.                                                                        │
-│[x] Century              UNLOCKED                                                                 │
-│    Earn 100 lifetime Fathoms.                                                                    │
-│[x] All Bands            UNLOCKED                                                                 │
-│    Tune every carrier band.                                                                      │
-│[ ] Signal               LOCKED                                                                   │
-│    Reach a best peak of 1e12.                                                                    │
-│LIFETIME STATS                                                                                    │
-│  best peak          840B                                                                         │
-│  descents           12                                                                           │
-│  era fathoms        120                                                                          │
-│  lifetime fathoms   300                                                                          │
-│  manual pulses      210                                                                          │
-│  auto pulses        900                                                                          │
-│  purchases          640                                                                          │
-│  bands matched      180                                                                          │
-│  total uptime       100:00:00                                                                    │
-│  current depth      9,412 m                                                                      │
+│  [x] Mast                 UNLOCKED                                                               │
+│      Own a Sonar Mast.                                                                           │
+│  [x] Core                 UNLOCKED                                                               │
+│      Own a Tidal Core.                                                                           │
+│  [x] First Descent        UNLOCKED                                                               │
+│      Complete a Descent.                                                                         │
+│  [x] Six Deep             UNLOCKED                                                               │
+│      Complete six Descents.                                                                      │
+│  [x] Century              UNLOCKED                                                               │
+│      Earn 100 lifetime Fathoms.                                                                  │
+│  [x] All Bands            UNLOCKED                                                               │
+│      Tune every carrier band.                                                                    │
+│  [ ] Signal               LOCKED                                                                 │
+│      Reach a best peak of 1e12.                                                                  │
+│  LIFETIME STATS                                                                                  │
+│    best peak          840B                                                                       │
+│    descents           12                                                                         │
+│    era fathoms        120                                                                        │
+│    lifetime fathoms   300                                                                        │
+│    manual pulses      210                                                                        │
+│    auto pulses        900                                                                        │
+│    purchases          640                                                                        │
+│    bands matched      180                                                                        │
+│    total uptime       100:00:00                                                                  │
+│    current depth      9,412 m                                                                    │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│↑ ↓ scroll   PgUp/PgDn page   Esc back   20-45/45                                                 │
+│↑ ↓ scroll  PgUp/PgDn page  Esc back  20-45/45  ? manual                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

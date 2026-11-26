@@ -6,6 +6,7 @@
 use crossterm::event::MouseButton;
 use hadal_core::BuyQuantity;
 use hadal_core::Engine;
+use hadal_core::GameState;
 use hadal_core::content::story::BOOT_LINES;
 use hadal_core::simulate_offline;
 use ratatui::Terminal;
@@ -94,6 +95,269 @@ impl Fixture {
     }
 }
 
+fn engine_with(engine: Engine, mutate: impl FnOnce(&mut serde_json::Value)) -> Engine {
+    let mut value = serde_json::to_value(engine.state()).expect("state json");
+    mutate(&mut value);
+    let state: GameState = serde_json::from_value(value).expect("state");
+    Engine::from_state(state)
+}
+
+fn coach_ui(fixture: &Fixture, screen: Screen, ascii: bool) -> UiState<'_> {
+    let mut ui = fixture.ui(screen, ascii);
+    ui.tutorial = Some(fixture.engine.tutorial());
+    ui
+}
+
+// ---------------------------------------------------------------------
+// Tutorial coach
+// ---------------------------------------------------------------------
+
+#[test]
+fn coach_step0_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    insta::assert_snapshot!(
+        "coach_step0_80x24",
+        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
+    );
+}
+
+#[test]
+fn coach_step0_100x30() {
+    let fixture = Fixture::new(Engine::new());
+    insta::assert_snapshot!(
+        "coach_step0_100x30",
+        draw(100, 30, &coach_ui(&fixture, Screen::Sonar, false))
+    );
+}
+
+#[test]
+fn coach_waiting_hydro_80x24() {
+    let engine = engine_with(Engine::demo(), |value| {
+        value["meta"]["tutorial"] = serde_json::json!({
+            "step": 3,
+            "completed": false,
+            "skipped": false,
+            "seen_carrier_change": false,
+            "tuned_since_change": false,
+            "manual_opened": false,
+            "manual_closed": false,
+            "system_opened": false,
+            "acknowledged": false,
+        });
+        value["run"]["generators"] = serde_json::json!([4, 0, 0, 0]);
+    });
+    let fixture = Fixture::new(engine);
+    insta::assert_snapshot!(
+        "coach_waiting_hydro_80x24",
+        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
+    );
+}
+
+#[test]
+fn coach_tune_waiting_80x24() {
+    let engine = engine_with(Engine::demo(), |value| {
+        value["meta"]["tutorial"] = serde_json::json!({
+            "step": 5,
+            "completed": false,
+            "skipped": false,
+            "seen_carrier_change": true,
+            "tuned_since_change": true,
+            "manual_opened": false,
+            "manual_closed": false,
+            "system_opened": false,
+            "acknowledged": false,
+        });
+        value["run"]["carrier_band"] = serde_json::json!(2);
+        value["run"]["tuned_band"] = serde_json::json!(2);
+    });
+    let fixture = Fixture::new(engine);
+    insta::assert_snapshot!(
+        "coach_tune_waiting_80x24",
+        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
+    );
+}
+
+#[test]
+fn coach_hull_descent_80x24() {
+    let engine = engine_with(Engine::demo(), |value| {
+        value["meta"]["tutorial"] = serde_json::json!({
+            "step": 8,
+            "completed": false,
+            "skipped": false,
+            "seen_carrier_change": true,
+            "tuned_since_change": true,
+            "manual_opened": false,
+            "manual_closed": false,
+            "system_opened": false,
+            "acknowledged": false,
+        });
+        value["meta"]["fathoms"] = serde_json::json!(1);
+        value["meta"]["stats"]["descents"] = serde_json::json!(1);
+        if let Some(hulls) = value["meta"]["hulls"].as_array_mut() {
+            hulls.retain(|hull| hull.as_str() != Some("auto_pulse"));
+        }
+    });
+    let fixture = Fixture::new(engine);
+    let mut ui = coach_ui(&fixture, Screen::Descent, false);
+    ui.focus = Focus::Hull(0);
+    insta::assert_snapshot!("coach_hull_descent_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_offline_80x24() {
+    let engine = engine_with(Engine::demo(), |value| {
+        value["meta"]["tutorial"] = serde_json::json!({
+            "step": 12,
+            "completed": false,
+            "skipped": false,
+            "seen_carrier_change": true,
+            "tuned_since_change": true,
+            "manual_opened": true,
+            "manual_closed": true,
+            "system_opened": true,
+            "acknowledged": false,
+        });
+    });
+    let fixture = Fixture::new(engine);
+    insta::assert_snapshot!(
+        "coach_offline_80x24",
+        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
+    );
+}
+
+#[test]
+fn skip_confirm_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    let mut ui = coach_ui(&fixture, Screen::Sonar, false);
+    ui.confirm_skip = true;
+    insta::assert_snapshot!("skip_confirm_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn system_tutorial_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    let mut ui = coach_ui(&fixture, Screen::System, false);
+    ui.focus = Focus::System(10);
+    insta::assert_snapshot!("system_tutorial_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_ascii_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    insta::assert_snapshot!(
+        "coach_ascii_80x24",
+        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, true))
+    );
+}
+
+#[test]
+fn sonar_completed_80x24() {
+    let fixture = Fixture::new(Engine::demo());
+    insta::assert_snapshot!(
+        "sonar_completed_80x24",
+        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
+    );
+}
+
+fn tutorial_engine(step: u8) -> Engine {
+    engine_with(Engine::demo(), |value| {
+        value["meta"]["tutorial"] = serde_json::json!({
+            "step": step,
+            "completed": false,
+            "skipped": false,
+            "seen_carrier_change": true,
+            "tuned_since_change": true,
+            "manual_opened": true,
+            "manual_closed": true,
+            "system_opened": true,
+            "acknowledged": false,
+        });
+    })
+}
+
+#[test]
+fn generator_columns_align_with_fixed_gutter() {
+    let fixture = Fixture::new(tutorial_engine(3));
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    let text = draw(80, 24, &ui);
+    let lines: Vec<&str> = text.lines().collect();
+    let header = lines
+        .iter()
+        .find(|line| line.contains("GENERATORS"))
+        .expect("generator header");
+    let header_chars: Vec<char> = header.chars().collect();
+    let owned_char = header_chars
+        .windows(5)
+        .position(|window| window == ['O', 'W', 'N', 'E', 'D'])
+        .expect("OWNED header")
+        .saturating_sub(1);
+    for name in ["Hydrophone", "Drifter", "Sonar Mast", "Tidal Core"] {
+        let row = lines
+            .iter()
+            .find(|line| {
+                line.contains(name) && line.contains("NEED")
+                    || line.contains(name) && line.contains("MAX")
+            })
+            .expect("generator row");
+        let chars: Vec<char> = row.chars().collect();
+        let field: String = chars[owned_char..owned_char + 6].iter().collect();
+        assert!(
+            field.trim().parse::<u32>().is_ok(),
+            "{name}: owned field {field:?} in {row:?}"
+        );
+    }
+    assert!(
+        text.contains("  h/H Hydrophone") || text.contains("  h/H"),
+        "non-target rows use the blank gutter"
+    );
+    assert!(text.contains("▶ d/D"), "target row uses the marked gutter");
+}
+
+#[test]
+fn coach_band_and_target_never_overlap() {
+    for &(width, height) in &[(80u16, 24u16), (100, 30)] {
+        for step in 0u8..=11 {
+            let engine = tutorial_engine(step);
+            let fixture = Fixture::new(engine);
+            for screen in [Screen::Sonar, Screen::Descent] {
+                if screen == Screen::Descent && step != 8 {
+                    continue;
+                }
+                let ui = coach_ui(&fixture, screen, false);
+                let area = ratatui::layout::Rect::new(0, 0, width, height);
+                let coach = crate::render::coach::band_rect(&ui, area).expect("active coach");
+                let hits = draw_hits(width, height, &ui);
+                if step == 4 && screen == Screen::Sonar {
+                    let text = draw(width, height, &ui);
+                    assert!(text.contains("SIGNAL CHAIN"), "{width}x{height}: {text}");
+                    assert!(text.contains("Impedance Match"), "{width}x{height}: {text}");
+                }
+                let target = hits
+                    .tutorial_target
+                    .unwrap_or_else(|| panic!("step {step} screen {screen:?} has no target rect"));
+                let overlap = coach.x < target.x.saturating_add(target.width)
+                    && target.x < coach.x.saturating_add(coach.width)
+                    && coach.y < target.y.saturating_add(target.height)
+                    && target.y < coach.y.saturating_add(coach.height);
+                assert!(
+                    !overlap,
+                    "step {step} {width}x{height} {screen:?}: coach {coach:?} overlaps target {target:?}"
+                );
+                let inner = ratatui::layout::Rect::new(1, 1, width - 2, height - 2);
+                assert!(
+                    target.x >= inner.x
+                        && target.y >= inner.y
+                        && target.x.saturating_add(target.width)
+                            <= inner.x.saturating_add(inner.width)
+                        && target.y.saturating_add(target.height)
+                            <= inner.y.saturating_add(inner.height),
+                    "step {step} {width}x{height} {screen:?}: target {target:?} outside inner {inner:?}"
+                );
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------
 // Existing screens
 // ---------------------------------------------------------------------
@@ -139,27 +403,6 @@ fn boot_100x30() {
 }
 
 #[test]
-fn briefing_80x24_unicode() {
-    let fixture = Fixture::new(Engine::new());
-    let ui = fixture.ui(Screen::Briefing, false);
-    insta::assert_snapshot!("briefing_80x24_unicode", draw(80, 24, &ui));
-}
-
-#[test]
-fn briefing_80x24_ascii() {
-    let fixture = Fixture::new(Engine::new());
-    let ui = fixture.ui(Screen::Briefing, true);
-    insta::assert_snapshot!("briefing_80x24_ascii", draw(80, 24, &ui));
-}
-
-#[test]
-fn briefing_100x30() {
-    let fixture = Fixture::new(Engine::new());
-    let ui = fixture.ui(Screen::Briefing, false);
-    insta::assert_snapshot!("briefing_100x30", draw(100, 30, &ui));
-}
-
-#[test]
 fn demo_banner_100x30() {
     let fixture = Fixture::new(Engine::demo());
     let mut ui = fixture.ui(Screen::Sonar, false);
@@ -168,25 +411,14 @@ fn demo_banner_100x30() {
 }
 
 #[test]
-fn demo_briefing_and_banner_fit_80x24() {
+fn demo_banner_fits_80x24() {
     let fixture = Fixture::new(Engine::demo());
-    let mut briefing = fixture.ui(Screen::Briefing, false);
-    briefing.demo = true;
-    let text = draw(80, 24, &briefing);
-    assert!(text.contains("DEMO // NOTHING IS SAVED"), "{text}");
-    assert!(
-        text.contains("late game: 12 descents, 15 hulls, automation is on"),
-        "{text}"
-    );
-    assert!(text.contains("the station plays itself; keys are additive"));
-    assert!(text.contains("[any key] begin"), "footer clipped: {text}");
-
     let mut sonar = fixture.ui(Screen::Sonar, false);
     sonar.demo = true;
     let text = draw(80, 24, &sonar);
     assert!(text.contains("DEMO // NOTHING IS SAVED"), "{text}");
     assert!(text.contains("automation is on; keys additive"), "{text}");
-    assert!(text.contains("? briefing   1-4 screens"), "{text}");
+    assert!(text.contains("? manual   1-4 screens"), "{text}");
 }
 
 #[test]
@@ -686,7 +918,6 @@ fn ascii_mode_never_emits_non_ascii() {
         Screen::Boot {
             revealed: BOOT_LINES.len(),
         },
-        Screen::Briefing,
     ];
     for (width, height) in [(80u16, 24u16), (100, 30), (140, 40)] {
         for screen in screens {

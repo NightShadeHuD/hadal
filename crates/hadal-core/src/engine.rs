@@ -8,8 +8,9 @@ use thiserror::Error;
 
 use crate::content::ids::{AchievementId, GeneratorId, HullId, LogId, UpgradeId};
 use crate::content::tables::{self, UpgradeEffect};
+use crate::content::tutorial::{COMPLETED_STEP, STEPS, TutorialStep, TutorialStepId};
 use crate::decimal::Decimal;
-use crate::state::GameState;
+use crate::state::{GameState, TutorialState};
 use crate::view::StateView;
 
 /// Maximum buffered events. Oldest are dropped when full.
@@ -154,6 +155,45 @@ pub enum Event {
     LogRecorded(LogId),
 }
 
+/// UI interactions the tutorial observes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TutorialUiEvent {
+    /// The SYSTEM tab was opened.
+    SystemOpened,
+    /// The field manual was opened.
+    ManualOpened,
+    /// The field manual was closed.
+    ManualClosed,
+}
+
+/// Numeric progress for the current tutorial step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TutorialProgress {
+    /// Short label for the tracked quantity.
+    pub label: &'static str,
+    /// Current value.
+    pub current: Decimal,
+    /// Target value.
+    pub target: Decimal,
+}
+
+/// Read-only view of the current tutorial step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TutorialView<'a> {
+    /// The step definition.
+    pub step: &'a TutorialStep,
+    /// Step index (clamped to the last step when completed).
+    pub index: u8,
+    /// Chapter number.
+    pub chapter: u8,
+    /// Whether the tutorial is finished.
+    pub completed: bool,
+    /// Whether the player skipped it.
+    pub skipped: bool,
+    /// Optional numeric progress.
+    pub progress: Option<TutorialProgress>,
+}
+
 /// The core game engine.
 pub struct Engine {
     pub(crate) state: GameState,
@@ -188,6 +228,10 @@ impl Engine {
     /// across descents even when current counts later fall below a threshold).
     pub fn demo() -> Self {
         let mut state = GameState::new();
+        state.meta.tutorial = crate::state::TutorialState {
+            step: COMPLETED_STEP,
+            ..Default::default()
+        };
 
         state.meta.fathoms = 140;
         state.meta.era_fathoms = 120;
@@ -281,7 +325,7 @@ impl Engine {
     ///
     /// Returns a typed [`ActionError`] when the action is not currently legal.
     pub fn apply(&mut self, action: Action) -> Result<(), ActionError> {
-        match action {
+        let result = match action {
             Action::Pulse => self.do_pulse(),
             Action::SetTuning { band } => self.do_set_tuning(band),
             Action::BuyGenerator { id, quantity } => self.do_buy_generator(id, quantity),
@@ -290,7 +334,11 @@ impl Engine {
             Action::SetAutoBuy { id, enabled } => self.do_set_auto_buy(id, enabled),
             Action::SetAutoDescendTarget { fathoms } => self.do_set_auto_descend_target(fathoms),
             Action::Descend => self.do_descend(),
+        };
+        if result.is_ok() {
+            self.observe_tutorial();
         }
+        result
     }
 
     /// Returns a read-only view of current state.
@@ -328,6 +376,66 @@ impl Engine {
         }
     }
 
+    /// Returns the current tutorial step view.
+    pub fn tutorial(&self) -> TutorialView<'_> {
+        let tutorial = &self.state.meta.tutorial;
+        let completed = tutorial.completed || tutorial.step >= COMPLETED_STEP;
+        let index = tutorial.step.min((STEPS.len() - 1) as u8);
+        let step = &STEPS[index as usize];
+        let progress = if completed || tutorial.skipped {
+            None
+        } else {
+            tutorial_progress(&self.state, tutorial.step)
+        };
+        TutorialView {
+            step,
+            index,
+            chapter: step.chapter,
+            completed,
+            skipped: tutorial.skipped,
+            progress,
+        }
+    }
+
+    /// Records a UI interaction and advances the tutorial if it satisfies the
+    /// current step.
+    pub fn tutorial_ui(&mut self, event: TutorialUiEvent) {
+        {
+            let tutorial = &mut self.state.meta.tutorial;
+            match event {
+                TutorialUiEvent::SystemOpened => tutorial.system_opened = true,
+                TutorialUiEvent::ManualOpened => tutorial.manual_opened = true,
+                TutorialUiEvent::ManualClosed => tutorial.manual_closed = true,
+            }
+        }
+        self.observe_tutorial();
+    }
+
+    /// Acknowledges the final (Offline) step and completes the tutorial.
+    pub fn tutorial_acknowledge(&mut self) {
+        let tutorial = &mut self.state.meta.tutorial;
+        if !tutorial.skipped && !tutorial.completed && tutorial.step == 12 {
+            tutorial.acknowledged = true;
+            tutorial.step = COMPLETED_STEP;
+            tutorial.completed = true;
+        }
+    }
+
+    /// Skips the tutorial. Idempotent.
+    pub fn tutorial_skip(&mut self) {
+        let tutorial = &mut self.state.meta.tutorial;
+        if !tutorial.completed {
+            tutorial.skipped = true;
+            tutorial.completed = false;
+        }
+    }
+
+    /// Restarts the tutorial from step 0 with all helper flags cleared.
+    /// Idempotent.
+    pub fn tutorial_replay(&mut self) {
+        self.state.meta.tutorial = TutorialState::new();
+    }
+
     /// Drains buffered events in order.
     pub fn drain_events(&mut self) -> impl Iterator<Item = Event> + '_ {
         self.events.drain(..)
@@ -358,6 +466,8 @@ impl Engine {
             let count = crate::content::ids::CarrierBand::COUNT;
             let band = (self.state.run.carrier_band + 1) % count;
             self.state.run.carrier_band = band;
+            self.state.meta.tutorial.seen_carrier_change = true;
+            self.state.meta.tutorial.tuned_since_change = false;
             self.dirty = true;
             self.push_event(Event::CarrierChanged { band });
             if self.state.meta.hulls.contains(&HullId::TunedBallast) {
@@ -441,6 +551,8 @@ impl Engine {
         // 10. Counters.
         self.state.run.run_ticks = self.state.run.run_ticks.saturating_add(1);
         self.state.meta.stats.total_ticks = self.state.meta.stats.total_ticks.saturating_add(1);
+
+        self.observe_tutorial();
     }
 
     /// Advances `ticks` fixed steps; equivalent to calling [`Engine::tick`]
@@ -458,6 +570,30 @@ impl Engine {
             self.dirty = false;
         }
         self.cached_rate
+    }
+
+    /// Advances the tutorial while the current step is satisfied, at most 16
+    /// steps per call. The final (Offline) step waits for acknowledgement.
+    fn observe_tutorial(&mut self) {
+        let mut advanced = 0u8;
+        loop {
+            let tutorial = &self.state.meta.tutorial;
+            if tutorial.completed || tutorial.skipped {
+                break;
+            }
+            let step = tutorial.step;
+            if step >= 12 || step >= COMPLETED_STEP {
+                break;
+            }
+            if !tutorial_step_satisfied(&self.state, step) {
+                break;
+            }
+            self.state.meta.tutorial.step = step + 1;
+            advanced += 1;
+            if advanced >= 16 {
+                break;
+            }
+        }
     }
 
     // -----------------------------------------------------------------
@@ -495,6 +631,16 @@ impl Engine {
             self.state.meta.bands_seen[band as usize] = true;
             self.state.meta.stats.bands_matched =
                 self.state.meta.stats.bands_matched.saturating_add(1);
+        }
+        let tutorial = &self.state.meta.tutorial;
+        let on_tune_step = !tutorial.completed
+            && !tutorial.skipped
+            && STEPS
+                .get(tutorial.step as usize)
+                .map(|step| step.id == TutorialStepId::Tune)
+                .unwrap_or(false);
+        if on_tune_step {
+            self.state.meta.tutorial.tuned_since_change = true;
         }
         self.push_event(Event::Tuned { band, matched });
         self.refresh_achievements_and_logs();
@@ -981,6 +1127,58 @@ pub(crate) fn pulse_yield_from_rate(rate: Decimal, state: &GameState) -> Decimal
 /// Echo granted by one full-capacitor pulse.
 pub(crate) fn pulse_yield(state: &GameState) -> Decimal {
     pulse_yield_from_rate(production_rate(state), state)
+}
+
+fn tutorial_step_satisfied(state: &GameState, step: u8) -> bool {
+    let Some(def) = STEPS.get(step as usize) else {
+        return false;
+    };
+    let run = &state.run;
+    let meta = &state.meta;
+    let owned = |id: GeneratorId| run.generators[id.index()];
+    match def.id {
+        TutorialStepId::Pulse => meta.stats.pulses_manual >= 1,
+        TutorialStepId::FirstGenerator => owned(GeneratorId::Hydrophone) >= 1,
+        TutorialStepId::SecondGenerator => owned(GeneratorId::Hydrophone) >= 2,
+        TutorialStepId::Upgrade => run.upgrades.contains(&UpgradeId::ImpedanceMatch),
+        TutorialStepId::Tune => {
+            meta.tutorial.seen_carrier_change
+                && meta.tutorial.tuned_since_change
+                && run.tuned_band == run.carrier_band
+        }
+        TutorialStepId::Drifter => owned(GeneratorId::Drifter) >= 1,
+        TutorialStepId::Peak => {
+            !run.peak_echo.is_zero() && run.peak_echo.exponent10() >= tables::DESCENT_THRESHOLD_EXP
+        }
+        TutorialStepId::Descend => meta.stats.descents >= 1,
+        TutorialStepId::Hull => meta.hulls.contains(&HullId::AutoPulse),
+        TutorialStepId::SecondDescent => meta.stats.descents >= 2,
+        TutorialStepId::System => meta.tutorial.system_opened,
+        TutorialStepId::Manual => meta.tutorial.manual_opened && meta.tutorial.manual_closed,
+        TutorialStepId::Offline => meta.tutorial.acknowledged,
+    }
+}
+
+fn tutorial_progress(state: &GameState, step: u8) -> Option<TutorialProgress> {
+    let def = STEPS.get(step as usize)?;
+    let run = &state.run;
+    let meta = &state.meta;
+    let hydro = dec_u32(run.generators[GeneratorId::Hydrophone.index()]);
+    let (label, current, target) = match def.id {
+        TutorialStepId::FirstGenerator => ("HYDROPHONES", hydro, dec_u32(1)),
+        TutorialStepId::SecondGenerator => ("HYDROPHONES", hydro, dec_u32(2)),
+        TutorialStepId::Upgrade => ("ECHO", run.echo, dec_u32(100)),
+        TutorialStepId::Drifter => ("HYDROPHONES", hydro, dec_u32(10)),
+        TutorialStepId::Peak => ("PEAK ECHO", run.peak_echo, dec_f64(1_000_000.0)),
+        TutorialStepId::Descend => ("DESCENTS", dec_u32(meta.stats.descents), dec_u32(1)),
+        TutorialStepId::SecondDescent => ("DESCENTS", dec_u32(meta.stats.descents), dec_u32(2)),
+        _ => return None,
+    };
+    Some(TutorialProgress {
+        label,
+        current,
+        target,
+    })
 }
 
 #[cfg(test)]
@@ -2157,7 +2355,7 @@ mod tests {
         );
         assert_eq!(
             a.state_hash(),
-            "733aed7d902693d53fda5412d6374d15a55c96b9dc4361fa811a900dbd788f53"
+            "1bec052fe29b7f6085a17a2f59b47679fb775c5141169b804329eb476ac84dee"
         );
     }
 
@@ -2170,7 +2368,7 @@ mod tests {
         assert_eq!(a.state_hash(), b.state_hash());
         assert_eq!(
             a.state_hash(),
-            "4fc33cfdbbc766663ba513cddf02f9d0d983f8a76e704fc71f4d1744e4fcbfaf"
+            "89bca914158ef0cf8e547cf2ea1fae01f3ac278ea19a909d84f0a6d174a4f049"
         );
     }
 
@@ -2316,5 +2514,371 @@ mod tests {
         rebuilt.tick();
 
         assert_eq!(source.state_hash(), rebuilt.state_hash());
+    }
+
+    // -----------------------------------------------------------------
+    // Tutorial
+    // -----------------------------------------------------------------
+
+    fn step_satisfied(engine: &Engine, step: u8) -> bool {
+        tutorial_step_satisfied(&engine.state, step)
+    }
+
+    #[test]
+    fn test_tutorial_predicates() {
+        // Fresh state satisfies nothing.
+        let fresh = Engine::new();
+        for step in 0..13u8 {
+            assert!(
+                !step_satisfied(&fresh, step),
+                "step {step} unexpectedly true"
+            );
+        }
+
+        let mut engine = Engine::new();
+        engine.state.meta.stats.pulses_manual = 1;
+        assert!(step_satisfied(&engine, 0));
+
+        let mut engine = Engine::new();
+        engine.state.run.generators[GeneratorId::Hydrophone.index()] = 1;
+        assert!(step_satisfied(&engine, 1));
+
+        let mut engine = Engine::new();
+        engine.state.run.generators[GeneratorId::Hydrophone.index()] = 2;
+        assert!(step_satisfied(&engine, 2));
+
+        let mut engine = Engine::new();
+        engine.state.run.generators[GeneratorId::Drifter.index()] = 1;
+        assert!(step_satisfied(&engine, 3));
+
+        let mut engine = Engine::new();
+        engine.state.run.upgrades.insert(UpgradeId::SweepProfile);
+        assert!(
+            !step_satisfied(&engine, 4),
+            "upgrade step is specific to Impedance Match"
+        );
+        engine.state.run.upgrades.insert(UpgradeId::ImpedanceMatch);
+        assert!(step_satisfied(&engine, 4));
+
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.seen_carrier_change = true;
+        engine.state.meta.tutorial.tuned_since_change = true;
+        engine.state.run.carrier_band = 2;
+        engine.state.run.tuned_band = 2;
+        assert!(step_satisfied(&engine, 5));
+
+        let mut engine = Engine::new();
+        engine.state.run.peak_echo = Decimal::from_parts(1.0, 6).unwrap();
+        assert!(step_satisfied(&engine, 6));
+
+        let mut engine = Engine::new();
+        engine.state.meta.stats.descents = 1;
+        assert!(step_satisfied(&engine, 7));
+
+        let mut engine = Engine::new();
+        engine.state.meta.hulls.insert(HullId::AutoPulse);
+        assert!(step_satisfied(&engine, 8));
+
+        let mut engine = Engine::new();
+        engine.state.meta.stats.descents = 2;
+        assert!(step_satisfied(&engine, 9));
+
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.system_opened = true;
+        assert!(step_satisfied(&engine, 10));
+
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.manual_opened = true;
+        engine.state.meta.tutorial.manual_closed = true;
+        assert!(step_satisfied(&engine, 11));
+
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.acknowledged = true;
+        assert!(step_satisfied(&engine, 12));
+    }
+
+    #[test]
+    fn test_tutorial_progress_values() {
+        let mut engine = Engine::new();
+        let progress = |engine: &mut Engine, step: u8| {
+            engine.state.meta.tutorial.step = step;
+            engine.tutorial().progress
+        };
+
+        let p = progress(&mut engine, 1).unwrap();
+        assert_eq!(p.label, "HYDROPHONES");
+        assert_eq!(p.current, Decimal::ZERO);
+        assert_eq!(p.target, Decimal::from_u64(1));
+
+        engine.state.run.generators[GeneratorId::Hydrophone.index()] = 1;
+        let p = progress(&mut engine, 2).unwrap();
+        assert_eq!(p.target, Decimal::from_u64(2));
+
+        engine.state.run.generators[GeneratorId::Hydrophone.index()] = 3;
+        let p = progress(&mut engine, 3).unwrap();
+        assert_eq!(p.label, "HYDROPHONES");
+        assert_eq!(p.current, Decimal::from_u64(3));
+        assert_eq!(p.target, Decimal::from_u64(10));
+
+        engine.state.run.echo = Decimal::from_u64(50);
+        let p = progress(&mut engine, 4).unwrap();
+        assert_eq!(p.label, "ECHO");
+        assert_eq!(p.current, Decimal::from_u64(50));
+        assert_eq!(p.target, Decimal::from_u64(100));
+
+        engine.state.run.peak_echo = Decimal::from_parts(2.0, 5).unwrap();
+        let p = progress(&mut engine, 6).unwrap();
+        assert_eq!(p.label, "PEAK ECHO");
+        assert_eq!(p.target, Decimal::from_parts(1.0, 6).unwrap());
+
+        engine.state.meta.stats.descents = 1;
+        let p = progress(&mut engine, 7).unwrap();
+        assert_eq!(p.label, "DESCENTS");
+        assert_eq!(p.target, Decimal::from_u64(1));
+        let p = progress(&mut engine, 9).unwrap();
+        assert_eq!(p.target, Decimal::from_u64(2));
+
+        for step in [0u8, 5, 8, 10, 11, 12] {
+            assert!(progress(&mut engine, step).is_none(), "step {step}");
+        }
+    }
+
+    #[test]
+    fn test_tune_requires_post_drift_keypress() {
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.step = 5; // Tune
+        engine.state.run.carrier_band = 0;
+        engine.state.run.tuned_band = 0;
+
+        // Already matched before any drift: a tuning keypress alone is not enough.
+        engine.apply(Action::SetTuning { band: 0 }).unwrap();
+        assert!(engine.state.meta.tutorial.tuned_since_change);
+        assert!(!engine.state.meta.tutorial.seen_carrier_change);
+        assert_eq!(engine.tutorial().index, 5);
+
+        // Carrier drift clears the keypress requirement.
+        engine.advance(900);
+        assert!(engine.state.meta.tutorial.seen_carrier_change);
+        assert!(!engine.state.meta.tutorial.tuned_since_change);
+        assert_eq!(engine.tutorial().index, 5);
+
+        // Tuning to the wrong band is still a keypress but not a match.
+        engine.apply(Action::SetTuning { band: 0 }).unwrap();
+        assert!(engine.state.meta.tutorial.tuned_since_change);
+        assert_eq!(engine.tutorial().index, 5);
+
+        // Post-drift tuning to the carrier satisfies the step.
+        engine.apply(Action::SetTuning { band: 1 }).unwrap();
+        assert_eq!(engine.tutorial().index, 6);
+    }
+
+    fn buy_everything(engine: &mut Engine) {
+        for id in [
+            GeneratorId::Hydrophone,
+            GeneratorId::Drifter,
+            GeneratorId::SonarMast,
+            GeneratorId::TidalCore,
+        ] {
+            let _ = engine.apply(Action::BuyGenerator {
+                id,
+                quantity: BuyQuantity::Max,
+            });
+        }
+        for id in UpgradeId::ALL {
+            let _ = engine.apply(Action::BuyUpgrade(*id));
+        }
+        let _ = engine.apply(Action::BuyHull(HullId::AutoPulse));
+    }
+
+    fn advance_to_peak(engine: &mut Engine) {
+        for _ in 0..5000 {
+            engine.advance(10);
+            if !engine.view().peak().is_zero() && engine.view().peak().exponent10() >= 6 {
+                return;
+            }
+            if engine.view().can_pulse() {
+                let _ = engine.apply(Action::Pulse);
+            }
+            buy_everything(engine);
+        }
+        panic!(
+            "peak not reached; tutorial step {}",
+            engine.tutorial().index
+        );
+    }
+
+    #[test]
+    fn test_tutorial_full_progression() {
+        let mut engine = Engine::new();
+        assert_eq!(engine.tutorial().index, 0);
+
+        // Step 0: pulse.
+        engine.apply(Action::Pulse).unwrap();
+        assert_eq!(engine.tutorial().index, 1);
+
+        // Steps 1-2: two Hydrophones.
+        engine
+            .apply(Action::BuyGenerator {
+                id: GeneratorId::Hydrophone,
+                quantity: BuyQuantity::One,
+            })
+            .unwrap();
+        for _ in 0..100 {
+            engine.advance(10);
+            if engine.view().echo() >= Decimal::from_u64(12) {
+                break;
+            }
+        }
+        engine
+            .apply(Action::BuyGenerator {
+                id: GeneratorId::Hydrophone,
+                quantity: BuyQuantity::One,
+            })
+            .unwrap();
+        assert!(engine.view().generator_owned(GeneratorId::Hydrophone) >= 2);
+        assert_eq!(engine.tutorial().index, 3);
+
+        // Step 3: reach 10 Hydrophones and buy a Drifter.
+        for _ in 0..3000 {
+            engine.advance(10);
+            let _ = engine.apply(Action::BuyGenerator {
+                id: GeneratorId::Hydrophone,
+                quantity: BuyQuantity::Max,
+            });
+            let _ = engine.apply(Action::BuyGenerator {
+                id: GeneratorId::Drifter,
+                quantity: BuyQuantity::Max,
+            });
+            if engine.view().generator_owned(GeneratorId::Drifter) >= 1
+                && engine.view().echo() >= Decimal::from_u64(150)
+            {
+                break;
+            }
+        }
+        assert!(engine.view().generator_owned(GeneratorId::Drifter) >= 1);
+        assert_eq!(engine.tutorial().index, 4);
+
+        // Step 4: Impedance Match is unlocked by the Drifter.
+        engine
+            .apply(Action::BuyUpgrade(UpgradeId::ImpedanceMatch))
+            .unwrap();
+        assert!(engine.view().upgrade_owned(UpgradeId::ImpedanceMatch));
+        assert_eq!(engine.tutorial().index, 5);
+
+        // Step 5: wait for the carrier to drift, then tune to it.
+        engine.advance(900);
+        assert!(engine.state.meta.tutorial.seen_carrier_change);
+        assert!(!engine.state.meta.tutorial.tuned_since_change);
+        let band = engine.view().carrier_band();
+        engine.apply(Action::SetTuning { band }).unwrap();
+        assert!(engine.tutorial().index >= 6, "tune chain");
+
+        // Step 6: peak 1e6.
+        if engine.tutorial().index == 6 {
+            advance_to_peak(&mut engine);
+        }
+        assert_eq!(engine.tutorial().index, 7);
+
+        // Step 7-8: descend, then buy Auto-Pulse.
+        engine.apply(Action::Descend).unwrap();
+        assert_eq!(engine.tutorial().index, 8);
+        engine.apply(Action::BuyHull(HullId::AutoPulse)).unwrap();
+        assert_eq!(engine.tutorial().index, 9);
+
+        // Step 9: second descent.
+        advance_to_peak(&mut engine);
+        engine.apply(Action::Descend).unwrap();
+        assert_eq!(engine.tutorial().index, 10);
+
+        // Steps 10-11: UI surfaces.
+        engine.tutorial_ui(TutorialUiEvent::SystemOpened);
+        assert_eq!(engine.tutorial().index, 11);
+        engine.tutorial_ui(TutorialUiEvent::ManualOpened);
+        engine.tutorial_ui(TutorialUiEvent::ManualClosed);
+        assert_eq!(engine.tutorial().index, 12);
+
+        // Step 12: acknowledge.
+        engine.tutorial_acknowledge();
+        assert!(engine.tutorial().completed);
+        assert!(engine.tutorial().progress.is_none());
+    }
+
+    #[test]
+    fn test_tutorial_out_of_order_flags() {
+        let mut engine = Engine::new();
+        // Flags set long before their step is current.
+        engine.tutorial_ui(TutorialUiEvent::SystemOpened);
+        engine.tutorial_ui(TutorialUiEvent::ManualOpened);
+        engine.tutorial_ui(TutorialUiEvent::ManualClosed);
+        assert_eq!(engine.tutorial().index, 0, "still waiting on pulse");
+
+        engine.state.meta.tutorial.step = 10;
+        engine.observe_tutorial();
+        assert_eq!(engine.tutorial().index, 12);
+    }
+
+    #[test]
+    fn test_tutorial_auto_advance_stops_at_acknowledge() {
+        let mut engine = Engine::new();
+        engine.state.meta.stats.pulses_manual = 1;
+        engine.state.run.generators = [10, 1, 0, 0];
+        engine.state.run.upgrades.insert(UpgradeId::ImpedanceMatch);
+        engine.state.meta.tutorial.seen_carrier_change = true;
+        engine.state.meta.tutorial.tuned_since_change = true;
+        engine.state.run.carrier_band = 0;
+        engine.state.run.tuned_band = 0;
+        engine.state.run.peak_echo = Decimal::from_parts(1.0, 6).unwrap();
+        engine.state.meta.stats.descents = 2;
+        engine.state.meta.hulls.insert(HullId::AutoPulse);
+        engine.state.meta.tutorial.system_opened = true;
+        engine.state.meta.tutorial.manual_opened = true;
+        engine.state.meta.tutorial.manual_closed = true;
+
+        engine.observe_tutorial();
+        assert_eq!(engine.tutorial().index, 12);
+        assert!(!engine.tutorial().completed);
+        engine.observe_tutorial();
+        assert_eq!(engine.tutorial().index, 12);
+    }
+
+    #[test]
+    fn test_tutorial_skip_and_replay_idempotent() {
+        let mut engine = Engine::new();
+        engine.tutorial_skip();
+        assert!(engine.tutorial().skipped);
+        assert!(!engine.tutorial().completed);
+        assert_eq!(engine.tutorial().index, 0);
+        assert!(engine.tutorial().progress.is_none());
+        engine.tutorial_skip();
+        assert!(engine.tutorial().skipped);
+
+        engine.tutorial_ui(TutorialUiEvent::SystemOpened);
+        engine.tutorial_replay();
+        assert_eq!(engine.tutorial().index, 0);
+        assert!(!engine.tutorial().skipped);
+        assert!(!engine.tutorial().completed);
+        assert!(!engine.state.meta.tutorial.system_opened);
+        engine.tutorial_replay();
+        assert_eq!(engine.state.meta.tutorial, TutorialState::new());
+    }
+
+    #[test]
+    fn test_tutorial_survives_descent() {
+        let mut engine = Engine::new();
+        engine.state.meta.tutorial.step = 9;
+        engine.state.run.peak_echo = Decimal::from_parts(1.0, 6).unwrap();
+        engine.apply(Action::Descend).unwrap();
+        assert_eq!(engine.state.meta.tutorial.step, 9);
+        assert!(!engine.tutorial().completed);
+        assert_eq!(engine.tutorial().chapter, 2);
+    }
+
+    #[test]
+    fn test_demo_tutorial_completed() {
+        let engine = Engine::demo();
+        assert!(engine.tutorial().completed);
+        assert!(!engine.tutorial().skipped);
+        assert!(engine.tutorial().progress.is_none());
+        assert_eq!(engine.tutorial().chapter, 2);
     }
 }

@@ -12,11 +12,11 @@ hadal-tui (bin: hadal) ──► hadal-core ◄── hadal-sim (bin: hadal-sim)
 xtask (bin: xtask) ── standalone dev tool
 ```
 
-- **hadal-core** — `decimal`, `content/{ids,tables,story}`, `engine`, `offline`,
+- **hadal-core** — `decimal`, `content/{ids,tables,story,tutorial}`, `engine`, `offline`,
   `save/{mod,paths,config,lock,migrate}`, `state`, `view`. No `ratatui`, `crossterm`,
   `clap`, wall-clock, RNG, environment, or filesystem in `tick()`.
 - **hadal-tui** (package `hadal`, bin `hadal`) — `main`, `app`, `boot`, `cli`, `glyphs`,
-  `input`, `model`, `render/{mod,sonar,descent,archive,system,help,briefing,dive,hits}`, `sanitize`,
+  `input`, `model`, `render/{mod,sonar,descent,archive,system,help,coach,dive,hits}`, `sanitize`,
   `terminal`, `theme`, and `golden` (test only). Mutates state only through `Engine::apply`.
 - **hadal-sim** (`lib` + `main`) — headless pacing profiles (`active`, `idle`, `offline`),
   serialisers, and assertions. Depends on core only.
@@ -55,10 +55,18 @@ impl Engine {
     pub fn state_hash(&self) -> String;     // SHA-256 of canonical state JSON
     pub fn state(&self) -> &GameState;      // persistence boundary only
     pub fn from_state(state: GameState) -> Self; // load/demo constructor
+    pub fn tutorial(&self) -> TutorialView<'_>;
+    pub fn tutorial_ui(&mut self, event: TutorialUiEvent);
+    pub fn tutorial_acknowledge(&mut self);
+    pub fn tutorial_skip(&mut self);
+    pub fn tutorial_replay(&mut self);
 }
 
 pub fn simulate_offline(engine: &mut Engine, elapsed_secs: u64) -> OfflineReport;
 ```
+
+Tutorial steps advance by an observe-on-tick/apply predicate, at most 16 advances per call;
+`tutorial_replay` is honoured only before the first Descent.
 
 `StateView` accessor groups (read-only):
 
@@ -129,7 +137,8 @@ Three structs, every field `pub(crate)`:
   `descents`, `total_ticks`, `bands_matched`.
 - **MetaState** — `fathoms`, `era_fathoms`, `lifetime_fathoms`, `depth_m`, `auto_descend_at`,
   `hulls` (`BTreeSet<HullId>`), `auto_buy` (`[bool; 4]`), `achievements`, `logs`,
-  `bands_seen` (`[bool; 6]`), `stats`.
+  `bands_seen` (`[bool; 6]`), `tutorial` (`TutorialState`: step, completed, skipped, and
+  per-step flags), `stats`.
 - **RunState** — `echo`, `peak_echo`, `generators` (`[u32; 4]`), `upgrades`
   (`BTreeSet<UpgradeId>`), `charge_ticks`, `carrier_band`, `tuned_band`, `carrier_ticks`,
   `run_ticks`.
@@ -139,13 +148,13 @@ All serialise with `deny_unknown_fields`; economy values are `Decimal`; no `f64`
 
 ## Save format and load flow
 
-Schema **v1**. Envelope (canonical field order):
+Schema **v2** (`SUPPORTED_SCHEMA = 2`). Envelope (canonical field order):
 
 ```json
 {
   "format": "hadal-save",
-  "schema_version": 1,
-  "app_version": "0.1.0",
+  "schema_version": 2,
+  "app_version": "0.1.3",
   "saved_at_unix": <unix>,
   "save_counter": <u64>,
   "checksum": "sha256:<hex>",
@@ -169,8 +178,9 @@ Schema **v1**. Envelope (canonical field order):
   refused (`NewerSaveOnDisk`), so an older save never clobbers a newer one.
 - **Lock:** the data directory is created first, then `File::try_lock` on `save.lock`;
   `TryLockError::WouldBlock` maps to `AlreadyRunning`; released when the handle drops.
-- **Migration:** `MigrationChain` transforms the envelope `Value` before deserialization;
-  production v1 ships an empty chain and tests register a synthetic 0→1 step.
+- **Migration:** `MigrationChain` transforms the envelope `Value` before deserialization.
+  Production registers a real `1 -> 2` step that inserts a completed `TutorialState` into
+  existing saves; tests cover the v1 fixture and a synthetic 0→1 step.
 - **Config:** `config.json` is separate, unchecksummed, `#[serde(default)]`,
   forward-compatible, and never deleted on parse failure.
 - **Import/export:** import rejects files over 4 MiB and validates format, schema and checksum
@@ -204,8 +214,11 @@ then `HADAL_DATA_DIR`, then the platform default. Files: `save.json`, `save.bak.
   platform default; config is loaded and CLI overrides applied.
 - **Lock and load:** acquire the `save.lock` (skip for `--demo`), load primary/backup,
   handle future-schema and corruption, apply offline, then save once. An absent save file is a
-  typed `NoSave` (fresh install) and an empty directory boots to the briefing; `--demo`
-  creates nothing.
+  typed `NoSave` (fresh install) and an empty directory starts a fresh save and the tutorial;
+  `--demo` creates nothing.
+- **Tutorial coach:** `render/coach.rs` draws a reserved coach band (never covering its
+  target) plus the highlighted control; UI-only steps (SYSTEM, manual) are reported through
+  `Engine::tutorial_ui`; the session saves when the step changes.
 - **Fixed-step loop:** `STEP = 100 ms`, `MAX_STEPS = 20` per frame, `POLL = 33 ms`,
   `FRAME = 33 ms` (≈30 FPS), `AUTOSAVE = 30 s`, `GAP = 2 s`. A gap above `GAP` routes through
   offline catch-up; otherwise fixed 100 ms ticks are accumulated. Autosave fires every 30 s
@@ -218,11 +231,11 @@ then `HADAL_DATA_DIR`, then the platform default. Files: `save.json`, `save.bak.
   colour depth, bell — persisted separately from the save.
 - **TUI-only modules:** `boot` (title/boot lines), `glyphs` (Unicode/ASCII sets), `input`
   (pure keymap + bounded queue), `model` (derived names, requirements, contributions,
-  governor validation, bucket progress, the always-on objective line and selection
-  explainers), `render/*` (screens including the `briefing` first-run/demo panel; overlays
-  including the scrollable `help` with its 14-term glossary and `clear_overlay_band`;
-  shared vocabulary, too-small screen, click hit-testing), `sanitize` (C0/C1 control-character
-  scrubbing), `theme` (palettes, colour depth, WCAG contrast).
+  governor validation, bucket progress, the objective line and selection explainers),
+  `render/*` (screens including the `coach` tutorial band and highlights; overlays including
+  the scrollable `help`/glossary and `clear_overlay_band`; shared vocabulary, too-small
+  screen, click hit-testing), `sanitize` (C0/C1 control-character scrubbing), `theme`
+  (palettes, colour depth, WCAG contrast).
 
 ## Simulator
 

@@ -24,5 +24,5 @@ expression: "draw(80, 24, &ui)"
 │  Sweep Profile         750 OWNED Hydrophones ×3                              │
 │  Cascaded Gain       8,000 OWNED all production ×2                           │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│SPACE pulse   f tune   u chain   2 descent   Ctrl+S save   q quit             │
+│SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit        │
 └──────────────────────────────────────────────────────────────────────────────┘
