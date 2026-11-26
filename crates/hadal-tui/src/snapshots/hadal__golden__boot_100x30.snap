@@ -1,0 +1,25 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(100, 30, &ui)"
+---
+
+
+
+
+
+
+
+
+
+                                    █   █  ███  ████   ███  █
+                                    █   █ █   █ █   █ █   █ █
+                                    █████ █████ ████  █████ █████
+
+                         STATION K-9   //   DEPTH 7,912 M   //   CARRIER 01
+
+                                     RELAY K-9 // DEPTH 7,912 M
+                                      HYDROPHONE ARRAY: ONLINE
+                                 CARRIER DETECTED. IT IS REPEATING.
+                                OPERATOR 7, THE STATION IS LISTENING.
+
+                                            any key skips

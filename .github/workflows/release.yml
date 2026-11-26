@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - x86_64-pc-windows-msvc
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+    runs-on: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'ubuntu-latest' || matrix.target == 'x86_64-pc-windows-msvc' && 'windows-latest' || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install musl tools (linux target)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install aarch64 target
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: rustup target add aarch64-apple-darwin
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release -p hadal --target ${{ matrix.target }}
+
+      - name: Determine binary name
+        id: binname
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            echo "name=hadal.exe" >> $GITHUB_OUTPUT
+          else
+            echo "name=hadal" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Smoke test --version
+        run: ./target/${{ matrix.target }}/release/${{ steps.binname.outputs.name }} --version
+
+      - name: Create archive
+        id: archive
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          TARGET=${{ matrix.target }}
+          BIN=${{ steps.binname.outputs.name }}
+          ARCHIVE="hadal-${VERSION}-${TARGET}"
+
+          mkdir -p "${ARCHIVE}"
+          cp "target/${TARGET}/release/${BIN}" "${ARCHIVE}/"
+
+          # Copy licenses
+          cp LICENSE-MIT "${ARCHIVE}/" 2>/dev/null || true
+          cp LICENSE-APACHE "${ARCHIVE}/" 2>/dev/null || true
+          cp README.md "${ARCHIVE}/" 2>/dev/null || true
+
+          # Compute checksum
+          if [[ "${TARGET}" == *"windows"* ]]; then
+            HASH=$(sha256sum "${ARCHIVE}/${BIN}" | cut -d' ' -f1)
+            echo "${HASH}  ${BIN}" > "${ARCHIVE}/SHA256SUMS"
+          else
+            HASH=$(shasum -a 256 "${ARCHIVE}/${BIN}" | cut -d' ' -f1)
+            echo "${HASH}  ${BIN}" > "${ARCHIVE}/SHA256SUMS"
+          fi
+
+          # Package as tar.gz on Unix, zip on Windows
+          if [[ "${TARGET}" == *"windows"* ]]; then
+            7z a "${ARCHIVE}.zip" "${ARCHIVE}/*"
+            FILE="${ARCHIVE}.zip"
+          else
+            tar -czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+            FILE="${ARCHIVE}.tar.gz"
+          fi
+          echo "file=${FILE}" >> "$GITHUB_OUTPUT"
+
+          # Sidecar checksum of the archive itself, consumed by the installers
+          # (scripts/install.* download hadal-<version>-<target>.sha256).
+          if [[ "${TARGET}" == *"windows"* ]]; then
+            ARCHIVE_HASH=$(sha256sum "${FILE}" | cut -d' ' -f1)
+          else
+            ARCHIVE_HASH=$(shasum -a 256 "${FILE}" | cut -d' ' -f1)
+          fi
+          echo "${ARCHIVE_HASH}  ${FILE}" > "${ARCHIVE}.sha256"
+          echo "checksum=${ARCHIVE}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.file }}
+          path: |
+            ${{ steps.archive.outputs.file }}
+            ${{ steps.archive.outputs.checksum }}
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hadal-*
+          path: releases/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          gh release create "${VERSION}" \
+            --title "HADAL ${VERSION}" \
+            --generate-notes \
+            releases/hadal-*.tar.gz \
+            releases/hadal-*.zip \
+            releases/hadal-*.sha256

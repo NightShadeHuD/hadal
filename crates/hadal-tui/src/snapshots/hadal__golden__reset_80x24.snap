@@ -1,0 +1,28 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(80, 24, &ui)"
+---
+┌ HADAL ── SYSTEM ─────────────────────────────────────── v0.1.0  ── RELAY K-9 ┐
+│ 1 SONAR   2 DESCENT   3 ARCHIVE  [4 SYSTEM]                                  │
+│SETTINGS                                                                      │
+│  THEME                abyss                                                  │
+│  REDUCE MOTION        OFF                                                    │
+│  ASCII GLYPHS         OFF                                                    │
+│  MOUSE                ON                                                     │
+│  COLOR DEPTH          auto                                                   │
+│  T┌ RESET STATION ───────────────────────────────────────────────────────┐   │
+│AUT│Type DISCARD to delete save and backup:                               │   │
+│  A│ DISC▌                                                                │   │
+│  A│Type DISCARD exactly (case-sensitive).                                │   │
+│  A│                                                                      │   │
+│  A│Enter submit    Esc cancel                                            │   │
+│HUL│                                                                      │   │
+│NOT└──────────────────────────────────────────────────────────────────────┘   │
+│NOTE   --color from the command line is a session-only override               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│SAVE PATH  data/save.json                                                     │
+│STATUS     NOT SAVED YET                                                      │
+│s save   e export   i import   R reset                                        │
+│HADAL v0.1.0   -   credits: The HADAL Authors                                 │
+│CONTROLS  ↑↓ focus   Enter/Space change   t toggle   Esc back                 │
+└──────────────────────────────────────────────────────────────────────────────┘

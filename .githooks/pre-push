@@ -1,0 +1,38 @@
+#!/bin/sh
+# pre-push hook: runs cargo xtask gate and privacy before each push.
+#
+# On Windows, use `git config core.hooksPath .githooks` to enable.
+# chmod +x is not possible on Windows; the hook runs via git config instead.
+#
+# Install: git config core.hooksPath .githooks
+
+# Honour skip flag
+if [ "${HADAL_SKIP_PUSH_GATE}" = "1" ]; then
+    echo "pre-push: GATES SKIPPED BY HADAL_SKIP_PUSH_GATE"
+    exit 0
+fi
+
+echo "Running pre-push gate..."
+cargo xtask gate
+exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
+    echo ""
+    echo "Pre-push gate FAILED. Push aborted."
+    echo "Run 'cargo xtask gate' to see detailed errors."
+    exit $exit_code
+fi
+
+echo ""
+echo "Running privacy check..."
+cargo xtask privacy
+exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
+    echo ""
+    echo "Pre-push privacy FAILED. Push aborted."
+    exit $exit_code
+fi
+
+echo "Pre-push checks passed."
+exit 0

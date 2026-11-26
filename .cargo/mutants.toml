@@ -1,0 +1,1 @@
+exclude_globs = ["crates/xtask/**", "crates/hadal-tui/**", "crates/hadal-sim/**", "**/build.rs"]

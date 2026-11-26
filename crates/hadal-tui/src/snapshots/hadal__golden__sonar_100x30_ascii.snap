@@ -1,0 +1,34 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(100, 30, &ui)"
+---
++ HADAL -- RELAY K-9 ------------------------------------------------- DEPTH 9,412 m -- CARRIER 03 +
+|[1 SONAR]  2 DESCENT   3 ARCHIVE   4 SYSTEM                                                       |
+|ECHO 520M  +36.3M/s                                                                               |
+|PEAK 910M   FATHOM 140                                                                            |
+|NEXT   1.00B  ########::  83%                                                                     |
++--------------------------------------------------------------------------------------------------+
+|SONAR              ooooo.ooooo                   |SIGNAL CHAIN   u focus                          |
+|                oo      .      oo                |  Impedance Match       100 OWNED all x2        |
+|              oo    ooooooooo *  oo              |  Sweep Profile         750 OWNED Hydrophone x3 |
+|             oo   oo    .    oo   oo             |  Cascaded Gain       8,000 OWNED all x2        |
+|            oo   o  * ooooo    o   oo            |  Stable Drift       40,000 OWNED Drifter x3    |
+|            o   o   oo  .  oo   o   o            |  Coherent Aperture 300,000 OWNED all x2        |
+|            o---o---o---x---o---o---o            |  Mast Phasing        2.00M OWNED Sonar Mast x4 |
+|            o   o   oo  .  oo   o   o            |  Core Resonance      25.0M OWNED Tidal Core x3 |
+|            oo   o    ooooo    *   oo            |  Full Spectrum        150M OWNED all x3        |
+|             oo   oo    .    oo   oo             |STATION                                         |
+|              oo  * ooooooooo    oo              |DEPTH        9,412 m                            |
+|                oo      .      oo                |CARRIER      03                                 |
+|                   ooooo.ooooo                   |TUNED        03  TUNED                          |
+|PULSE  ############### 100%  READY               |RATE         36.3M/s                            |
+|TUNE   [1][2][3*][4][5][6]  TUNED                |PEAK         910M                               |
+|    GENERATORS OWNED    COST        OUTPUT STATE |BEST PEAK    840B                               |
+|h/H Hydrophone    46   6,196  +47,817.00/s MAX   |OFFLINE CAP  168 h                              |
+|d/D Drifter       28  25,742 +465,695.99/s MAX   |DESCENTS     12                                 |
+|m/M Sonar Mast    14 256,784      +4.65M/s MAX   |ACHIEVEMENTS 10                                 |
+|c/C Tidal Core     6   8.25M      +31.1M/s MAX   |PULSE        READY                              |
+|                                                                                                  |
++--------------------------------------------------------------------------------------------------+
+|SPACE pulse   f tune   u chain   2 descent   Ctrl+S save   q quit                                 |
++--------------------------------------------------------------------------------------------------+

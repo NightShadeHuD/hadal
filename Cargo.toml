@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/hadal-core",
+    "crates/hadal-tui",
+    "crates/hadal-sim",
+    "crates/xtask",
+]
+default-members = ["crates/hadal-tui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+authors = ["The HADAL Authors"]
+
+[workspace.dependencies]
+ratatui = "=0.30.2"
+crossterm = "=0.29.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.11.2"
+clap = { version = "=4.6.10", features = ["derive"] }
+thiserror = "=2.0.21"
+unicode-width = "=0.2.3"
+insta = "=1.49.0"
+tempfile = "=3.27.0"
+hadal-core = { path = "crates/hadal-core" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

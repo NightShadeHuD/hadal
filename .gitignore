@@ -1,0 +1,35 @@
+# Generated build artifacts
+/target
+
+# Cargo.lock IS committed (plan 5.1: pinned dependencies, reproducible binaries).
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files
+hadal_data/
+*.bak.json
+*.corrupt-*
+
+# xtask dist output
+dist/
+
+# cargo-mutants output
+mutants.out/
+mutants.out.old/
+
+# insta snapshot rejects (must be reviewed then accepted/removed)
+*.snap.new
+
+# Local scratch: manual QA data dir (plan 9.1) and throwaway logs
+/target/qa-data
+*.txt.bak
+/out.txt

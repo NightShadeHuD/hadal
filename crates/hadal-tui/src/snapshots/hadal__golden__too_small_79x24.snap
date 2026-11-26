@@ -1,0 +1,10 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(79, 24, &ui)"
+---
+                              TERMINAL TOO SMALL
+
+                                current  79x24
+                                required 80x24
+
+                    resize the terminal, or press q to quit

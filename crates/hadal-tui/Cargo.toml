@@ -1,0 +1,27 @@
+[package]
+name = "hadal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "hadal"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+hadal-core = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+unicode-width = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+tempfile = { workspace = true }

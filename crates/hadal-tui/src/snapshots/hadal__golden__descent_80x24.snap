@@ -1,0 +1,28 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(80, 24, &ui)"
+---
+┌ HADAL ── DESCENT ────────────────────────────── DEPTH 9,412 m ── DESCENTS 12 ┐
+│ 1 SONAR  [2 DESCENT]  3 ARCHIVE   4 SYSTEM                                   │
+│DEPTH GAUGE           │RUN    peak 910M   rate 36.3M/s                        │
+│ │ 20,000             │  descents 12  best 840B  era F 120  life F 300        │
+│ │                    │DESCENT +16 FATHOMS   READY                            │
+│ │                    │NEXT    1.00B  ████████░░  83%                         │
+│ │                    │RESETS Echo · Peak Echo · Generators                   │
+│ │                    │       Signal Chain upgrades · Pulse capacitor         │
+│ │                    │       Carrier tuning · Run tick counters              │
+│ ▼  9,412             │PERSISTS Fathoms · Era Fathoms · Lifetime Fathoms      │
+│ │  7,912             │         Hulls · Achievements · Logs · Depth           │
+├──────────────────────────────────────────────────────────────────────────────┤
+│HULL TREE   15/17 owned   ↑↓ focus   Enter buy                                │
+│AUTOMATION                                                                    │
+│> Auto-Pulse           1F OWNED  Fires a pulse whenever the capacitor is full.│
+│  Ballast Recall       2F OWNED  Start every run with 5 Hydrophones.          │
+│  Tuned Ballast        3F OWNED  Auto-tune to the carrier on every change.    │
+│  Auto-Buy I           5F OWNED  Auto-buy Hydrophones and Drifters.           │
+│  Auto-Buy II         20F OWNED  Auto-buy also covers Sonar Masts.            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000       │
+│                                                                              │
+│↑↓ focus   Enter buy   p confirm descent   +/- target   Esc back   1 sonar    │
+└──────────────────────────────────────────────────────────────────────────────┘
