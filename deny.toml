@@ -24,4 +24,3 @@ multiple-versions = "allow"
 
 [sources]
 allow-registry = ["crates-io"]
-deny-registry = []
