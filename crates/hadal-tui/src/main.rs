@@ -152,12 +152,17 @@ fn verify_save(path: &std::path::Path) -> Result<(), String> {
 // ---------------------------------------------------------------------
 
 fn run_tui(cli: &Cli) -> ExitCode {
+    run_tui_with(cli, terminal::is_interactive)
+}
+
+fn run_tui_with<F: Fn() -> bool>(cli: &Cli, is_tty: F) -> ExitCode {
     let opts = app::resolve_options(cli);
 
-    // Provision the data directory before any early exit, so a non-TTY launch
-    // (or a lock failure) still leaves the directory in place. An absent
-    // directory is a fresh install, not an error.
-    if let Err(err) = provision_data_dir(&opts.data_dir) {
+    // Provision only for a real game. Demo is a seeded, non-persistent preview:
+    // it must never create a data directory or lock/save file.
+    if provisions_data_dir(cli)
+        && let Err(err) = provision_data_dir(&opts.data_dir)
+    {
         eprintln!(
             "could not create data directory {}: {}",
             sanitize(&opts.data_dir.display().to_string()),
@@ -166,7 +171,7 @@ fn run_tui(cli: &Cli) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    if let Err(err) = ensure_interactive(terminal::is_interactive) {
+    if let Err(err) = ensure_interactive(is_tty) {
         eprintln!("{err}");
         return ExitCode::FAILURE;
     }
@@ -213,6 +218,11 @@ fn run_tui(cli: &Cli) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Whether this launch may write persistent state.
+fn provisions_data_dir(cli: &Cli) -> bool {
+    !cli.demo
 }
 
 /// Create the data directory (and parents) before the interactive session
@@ -351,5 +361,37 @@ mod headless_tests {
             provision_data_dir(&path).is_err(),
             "a regular file at the data-dir path must surface as an error"
         );
+    }
+
+    #[test]
+    fn provisioning_decision_is_demo_aware() {
+        let demo = Cli::try_parse_from(["hadal", "--demo"]).expect("demo cli");
+        let normal = Cli::try_parse_from(["hadal"]).expect("normal cli");
+        assert!(!provisions_data_dir(&demo));
+        assert!(provisions_data_dir(&normal));
+    }
+
+    #[test]
+    fn demo_never_provisions_but_non_tty_normal_does() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let nested = dir.path().join("fresh").join("nested");
+        let nested_text = nested.to_str().expect("nested utf8").to_owned();
+
+        let demo = Cli::try_parse_from(["hadal", "--demo", "--data-dir", nested_text.as_str()])
+            .expect("demo cli");
+        assert!(!provisions_data_dir(&demo));
+        let _ = run_tui_with(&demo, || false);
+        assert!(!nested.exists(), "demo must not create the data dir");
+
+        let normal =
+            Cli::try_parse_from(["hadal", "--data-dir", nested_text.as_str()]).expect("normal cli");
+        assert!(provisions_data_dir(&normal));
+        let _ = run_tui_with(&normal, || false);
+        assert!(
+            nested.is_dir(),
+            "a normal non-TTY launch provisions before the gate exits"
+        );
+        std::fs::remove_dir_all(&nested).expect("cleanup nested data dir");
+        assert!(!nested.exists());
     }
 }
