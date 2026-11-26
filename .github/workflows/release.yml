@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (unused when triggered by a v* tag)"
+        required: false
+        default: "0.0.0-dryrun"
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,27 +17,41 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - x86_64-pc-windows-msvc
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
-    runs-on: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'ubuntu-latest' || matrix.target == 'x86_64-pc-windows-msvc' && 'windows-latest' || 'macos-latest' }}
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          # Intel runner so the x86_64 artifact can be executed natively for the
+          # --version smoke test instead of relying on Rosetta on an arm64 host.
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    env:
+      # musl builds need an explicitly pinned C compiler/linker; Rust defaults to
+      # the host glibc gcc, which produces binaries that cannot link statically.
+      # The empty value on other matrix legs is ignored by cargo.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'musl-gcc' || '' }}
+      CC_x86_64_unknown_linux_musl: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'musl-gcc' || '' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install musl tools (linux target)
+      # Installs the toolchain and the target triple this matrix leg builds for,
+      # so `cargo build --target <triple>` has a std to link against.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Install aarch64 target
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: rustup target add aarch64-apple-darwin
-
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release
@@ -42,19 +62,26 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            echo "name=hadal.exe" >> $GITHUB_OUTPUT
+            echo "name=hadal.exe" >> "$GITHUB_OUTPUT"
           else
-            echo "name=hadal" >> $GITHUB_OUTPUT
+            echo "name=hadal" >> "$GITHUB_OUTPUT"
           fi
 
+      # Execute the artifact natively. Every matrix leg runs on a host matching
+      # its target architecture, so this is always a real execution check.
       - name: Smoke test --version
+        shell: bash
         run: ./target/${{ matrix.target }}/release/${{ steps.binname.outputs.name }} --version
 
       - name: Create archive
         id: archive
         shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
           TARGET=${{ matrix.target }}
           BIN=${{ steps.binname.outputs.name }}
           ARCHIVE="hadal-${VERSION}-${TARGET}"
@@ -62,21 +89,17 @@ jobs:
           mkdir -p "${ARCHIVE}"
           cp "target/${TARGET}/release/${BIN}" "${ARCHIVE}/"
 
-          # Copy licenses
           cp LICENSE-MIT "${ARCHIVE}/" 2>/dev/null || true
           cp LICENSE-APACHE "${ARCHIVE}/" 2>/dev/null || true
           cp README.md "${ARCHIVE}/" 2>/dev/null || true
 
-          # Compute checksum
           if [[ "${TARGET}" == *"windows"* ]]; then
             HASH=$(sha256sum "${ARCHIVE}/${BIN}" | cut -d' ' -f1)
-            echo "${HASH}  ${BIN}" > "${ARCHIVE}/SHA256SUMS"
           else
             HASH=$(shasum -a 256 "${ARCHIVE}/${BIN}" | cut -d' ' -f1)
-            echo "${HASH}  ${BIN}" > "${ARCHIVE}/SHA256SUMS"
           fi
+          echo "${HASH}  ${BIN}" > "${ARCHIVE}/SHA256SUMS"
 
-          # Package as tar.gz on Unix, zip on Windows
           if [[ "${TARGET}" == *"windows"* ]]; then
             7z a "${ARCHIVE}.zip" "${ARCHIVE}/*"
             FILE="${ARCHIVE}.zip"
@@ -107,6 +130,8 @@ jobs:
 
   release:
     needs: build
+    # A workflow_dispatch dry run only builds and uploads artifacts.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,12 +141,15 @@ jobs:
         with:
           pattern: hadal-*
           path: releases/
+          # download-artifact nests one directory per artifact by default, which
+          # would leave releases/hadal-*/*.tar.gz and break the glob below.
+          merge-multiple: true
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION="${GITHUB_REF#refs/tags/}"
           gh release create "${VERSION}" \
             --title "HADAL ${VERSION}" \
             --generate-notes \
