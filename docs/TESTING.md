@@ -17,6 +17,13 @@ policy, the gate, and the number anchor rule.
 Tests are behaviour-first; no tautologies or source-text assertions. Pacing is a release-mode
 integration test, not an ignored manual script.
 
+CI is verified green on Ubuntu, Windows and macOS (run `45820719408`, commit `f0b2356`): fmt,
+clippy, workspace tests on all three OSes, MSRV 1.89, release pacing, and `cargo-deny`. The
+pacing job runs the release integration test; the deny job runs `cargo-deny`. Local
+`cargo xtask gate` remains the single gate and its receipt is the local proof of a green tree.
+Mutation testing (`cargo mutants`) is still not installed, pending owner approval; pre-push
+prints `SKIPPED`.
+
 ## Exact commands
 
 ```text
@@ -141,6 +148,7 @@ The numbers in this file were measured on 2026-11-26.
 
 ## No unverified claims
 
-Documentation must not claim runtime verification on platforms not tested. macOS and Linux
-runtime stays explicitly unverified until CI runs. No claims of signing, notarization, or
-remote CI execution that has not happened.
+Documentation must not claim verification that has not happened. CI now runs the fmt, clippy,
+test (Ubuntu, Windows, macOS), MSRV 1.89, release pacing and `cargo-deny` jobs, so those
+platforms are verified by CI. No claims of signing or notarization are made, and release
+artifacts are not claimed until a tag is cut.

@@ -182,8 +182,8 @@ Reproduce with `cargo test -p hadal --release --bins measurement -- --nocapture`
 - Pacing bands in `docs/BALANCE.md` are met for `active`, `idle` and `offline`.
 - Manual playthrough: pulse → buy → tune → first Descent → hull → save → quit → relaunch →
   offline summary.
-- Goldens approved; no unverified claims in docs (macOS/Linux runtime stays unverified until
-  CI runs).
+- Goldens approved; no unverified claims in docs (CI verifies Ubuntu, Windows and macOS;
+  release artifacts are not claimed until a tag is cut).
 - No `f64` state, no transcendental functions in simulation, no wall clock/RNG in core.
 
 ## File ownership — where to change what

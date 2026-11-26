@@ -6,7 +6,7 @@ A terminal-native deep-sea signals incremental. You operate Relay K-9, a derelic
 
 ## Install
 
-Download release archives from the project's release page. Installers use `HADAL_DOWNLOAD_BASE` to locate the archive:
+Download release archives from the [Releases page](https://github.com/NightShadeHuD/hadal/releases); they will appear there once a tag is cut. Installers use `HADAL_DOWNLOAD_BASE` to locate the archive:
 
 - **Linux:** `scripts/install.sh` — verifies SHA-256, installs to `~/.local/bin` by default.
 - **Windows:** `scripts/install.ps1` — verifies with `Get-FileHash`, installs to `%LOCALAPPDATA%\hadal\bin`.
@@ -175,7 +175,7 @@ HADAL makes no network calls and collects no telemetry. All state lives in the l
 
 ## Verification status
 
-Windows verified locally (release build, all test suites, simulator pacing, and CLI smoke via `--version`, `--help`, `save path`). CI workflows are committed (`.github/workflows/ci.yml`, `.github/workflows/release.yml`) but have not yet been executed on the repository. macOS and Linux builds and runtime remain unverified until CI runs.
+Windows verified locally (release build, all test suites, simulator pacing, and CLI smoke via `--version`, `--help`, `save path`). CI passes on Ubuntu, Windows and macOS — fmt, clippy, workspace tests, MSRV 1.89, release pacing, and `cargo-deny` (see the [Actions page](https://github.com/NightShadeHuD/hadal/actions)). No release tag exists yet, so no release artifacts are claimed.
 
 ## License
 

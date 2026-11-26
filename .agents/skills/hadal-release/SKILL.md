@@ -81,7 +81,8 @@ Measured stripped Windows release binary: **1.71 MB** (budget < 20 MB).
 - No signing certificates are available; artifacts are unsigned. The README gives macOS
   quarantine (`xattr -d com.apple.quarantine hadal`) and Windows SmartScreen guidance. No
   notarization is claimed.
-- macOS/Linux runtime stays unverified until CI runs.
+- CI is green on Ubuntu, Windows and macOS (fmt, clippy, tests, MSRV 1.89, release pacing,
+  `cargo-deny`); release artifacts are not claimed until a tag is cut.
 - Version `0.1.0` for M1.
 
 ## Commands
