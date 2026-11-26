@@ -24,12 +24,14 @@ jobs:
             os: ubuntu-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-          # Intel runner so the x86_64 artifact can be executed natively for the
-          # --version smoke test instead of relying on Rosetta on an arm64 host.
+          # macos-13/macos-14 are not available to this repository, so both mac
+          # legs run on macos-latest (arm64). Only the arm64 artifact can be
+          # executed natively there; the x86_64 artifact is cross-built and
+          # verified with `file` plus the arch check instead of a run.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-latest
     runs-on: ${{ matrix.os }}
     env:
       # musl builds need an explicitly pinned C compiler/linker; Rust defaults to
@@ -67,11 +69,22 @@ jobs:
             echo "name=hadal" >> "$GITHUB_OUTPUT"
           fi
 
-      # Execute the artifact natively. Every matrix leg runs on a host matching
-      # its target architecture, so this is always a real execution check.
+      # Execute the artifact natively where the runner matches the target arch.
       - name: Smoke test --version
+        if: matrix.target != 'x86_64-apple-darwin'
         shell: bash
         run: ./target/${{ matrix.target }}/release/${{ steps.binname.outputs.name }} --version
+
+      # Can't execute an x86_64 mac binary on an arm64 runner without knowing
+      # Rosetta is installed, so verify the cross-built artifact structurally.
+      - name: Verify cross-compiled x86_64 artifact
+        if: matrix.target == 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.target }}/release/${{ steps.binname.outputs.name }}"
+          file "${BIN}"
+          file "${BIN}" | grep -q 'x86_64'
+          test -x "${BIN}"
 
       - name: Create archive
         id: archive
