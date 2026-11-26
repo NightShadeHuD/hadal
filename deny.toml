@@ -23,4 +23,4 @@ allow = [
 multiple-versions = "allow"
 
 [sources]
-allow-registry = ["crates-io"]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
