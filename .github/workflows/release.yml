@@ -146,6 +146,11 @@ jobs:
     # A workflow_dispatch dry run only builds and uploads artifacts.
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    # GITHUB_TOKEN must be able to create the release; the default token is
+    # read-only for `contents`, which yields "HTTP 403: Resource not accessible
+    # by integration" from `gh release create`.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
