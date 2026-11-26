@@ -12,6 +12,7 @@ use hadal_core::content::story::{BOOT_LINES, log_text};
 use hadal_core::content::tables::achievement_def;
 use hadal_core::save::SavePaths;
 use hadal_core::save::config::{Config, ConfigWarning, load_config, save_config};
+use hadal_core::save::lock::LockError;
 use hadal_core::{
     Action, Decimal, Engine, Event, LoadWarning, OfflineReport, SaveError, SaveLock, SaveStore,
     simulate_offline,
@@ -71,9 +72,12 @@ const EDIT_MAX_CHARS: usize = 512;
 /// Typed failures that stop startup before the loop begins.
 #[derive(Debug, thiserror::Error)]
 pub enum StartupError {
-    /// The save lock is held by another process.
+    /// The save lock is held by another process (or another lock I/O failure).
     #[error("{0}")]
     Lock(String),
+    /// The data directory cannot be used (wrong path type or creation failed).
+    #[error("{0}")]
+    DataDir(String),
     /// The save is from a newer schema.
     #[error("{0}")]
     FutureSchema(String),
@@ -441,8 +445,7 @@ impl Session {
             });
         }
 
-        let lock =
-            SaveLock::acquire(&opts.data_dir).map_err(|err| StartupError::Lock(err.to_string()))?;
+        let lock = SaveLock::acquire(&opts.data_dir).map_err(startup_lock_error)?;
         let mut store = SaveStore::new(&opts.data_dir);
 
         let (engine, saved_at, load_warning) = match store.load(now_unix) {
@@ -1420,8 +1423,28 @@ fn truncate(text: &str, max: usize) -> String {
     out
 }
 
+fn startup_lock_error(err: LockError) -> StartupError {
+    match &err {
+        LockError::AlreadyRunning => StartupError::Lock(err.to_string()),
+        LockError::NotADirectory { path } => StartupError::DataDir(format!(
+            "cannot use data directory {}: path is not a directory",
+            sanitize(&path.display().to_string())
+        )),
+        LockError::CreateDir { path, source } => StartupError::DataDir(format!(
+            "cannot use data directory {}: {}",
+            sanitize(&path.display().to_string()),
+            sanitize(&source.to_string())
+        )),
+        LockError::Io(_) => StartupError::Lock(err.to_string()),
+    }
+}
+
 fn is_missing(err: &SaveError) -> bool {
-    matches!(err, SaveError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
+    match err {
+        SaveError::NoSave { .. } => true,
+        SaveError::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
+        _ => false,
+    }
 }
 
 fn recovered_warning(warning: &Option<LoadWarning>) -> Option<String> {
@@ -2801,7 +2824,8 @@ mod tests {
             .err()
             .expect("must fail");
         assert!(matches!(&err, StartupError::Lock(_)));
-        assert!(err.to_string().contains("another HADAL instance"));
+        assert_eq!(err.to_string(), "another HADAL instance is already running");
+        assert!(!err.to_string().contains("cannot use data directory"));
         let after = std::fs::read(&path).expect("read");
         assert_eq!(before, after, "save untouched");
     }
@@ -3052,6 +3076,127 @@ mod tests {
             draw_engine(&descend).contains("2 > p > y"),
             "descent-available objective"
         );
+    }
+
+    #[test]
+    fn nested_nonexistent_data_dir_starts_fresh() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let nested = root.path().join("a").join("b").join("c");
+        let mut session = Session::start(&options(&nested), 1_000).expect("nested start");
+        assert!(nested.is_dir(), "lock must create the data directory");
+        assert_eq!(session.engine.view().echo(), Decimal::ZERO);
+        assert_eq!(session.engine.view().descents(), 0);
+        assert_eq!(session.engine.view().hull_count(), 0);
+        assert!(matches!(session.boot, Boot::New { .. }));
+        assert!(session.briefing);
+        assert!(session.banner().is_none(), "{:?}", session.banner());
+        assert!(!session.banner().unwrap_or("").contains("lock i/o error"));
+        session.skip_boot();
+        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+        assert!(
+            SavePaths::new(&nested).save().exists(),
+            "immediate save in the new directory"
+        );
+    }
+
+    #[test]
+    fn empty_data_dir_stays_fresh_install() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let empty = root.path().join("empty");
+        fs::create_dir(&empty).expect("empty dir");
+        let mut session = Session::start(&options(&empty), 1_000).expect("empty start");
+        assert!(matches!(session.boot, Boot::New { .. }));
+        assert!(session.briefing);
+        assert_eq!(session.engine.view().descents(), 0);
+        assert!(session.banner().is_none(), "{:?}", session.banner());
+        session.skip_boot();
+        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+    }
+
+    #[test]
+    fn demo_does_not_create_data_dir_or_lock() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let demo_dir = root.path().join("demo-data");
+        let mut opts = options(&demo_dir);
+        opts.demo = true;
+        let mut session = Session::start(&opts, 1_000).expect("demo start");
+        assert!(session.demo);
+        assert!(session._lock.is_none());
+        assert!(session.store.is_none());
+        assert!(!demo_dir.exists(), "demo must not create the data dir");
+        assert!(session.save_now(2_000));
+        assert!(!demo_dir.exists(), "demo save must not create the data dir");
+        assert!(!SavePaths::new(&demo_dir).save().exists());
+        assert_eq!(session.engine.view().hull_count(), 15);
+        assert!(matches!(session.boot, Boot::Done));
+        assert!(session.briefing);
+        assert_eq!(session.screen(Instant::now()), Screen::Briefing);
+    }
+
+    #[test]
+    fn regular_file_data_dir_is_a_friendly_error() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let file = root.path().join("data-file");
+        fs::write(&file, b"not a directory").expect("blocker file");
+        let err = Session::start(&options(&file), 1_000)
+            .err()
+            .expect("regular file must fail");
+        let path = sanitize(&file.display().to_string());
+        assert!(matches!(&err, StartupError::DataDir(_)), "{err:?}");
+        assert_eq!(
+            err.to_string(),
+            format!("cannot use data directory {path}: path is not a directory")
+        );
+        assert!(!err.to_string().contains("another HADAL instance"));
+        assert!(!err.to_string().contains("lock i/o error"));
+        eprintln!("regular-file data-dir error: {err}");
+    }
+
+    #[test]
+    fn create_dir_failure_is_a_friendly_error() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let blocker = root.path().join("blocker");
+        fs::write(&blocker, b"not a directory").expect("blocker file");
+        let nested = blocker.join("data");
+        let err = Session::start(&options(&nested), 1_000)
+            .err()
+            .expect("nested under a file must fail");
+        let path = sanitize(&nested.display().to_string());
+        assert!(matches!(&err, StartupError::DataDir(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(
+            message.starts_with(&format!("cannot use data directory {path}: ")),
+            "{message}"
+        );
+        assert!(!message.contains("another HADAL instance"));
+        assert!(!message.contains("lock i/o error"));
+        assert!(!nested.exists());
+        eprintln!("create-dir data-dir error: {message}");
+    }
+
+    #[test]
+    fn data_dir_error_paths_are_sanitized() {
+        let err = startup_lock_error(LockError::NotADirectory {
+            path: PathBuf::from("bad\x1bname"),
+        });
+        assert!(matches!(&err, StartupError::DataDir(_)));
+        let message = err.to_string();
+        assert_eq!(
+            message,
+            "cannot use data directory bad\u{FFFD}name: path is not a directory"
+        );
+        assert!(!message.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn no_save_and_missing_files_are_fresh_install() {
+        let path = PathBuf::from("some/dir");
+        assert!(is_missing(&SaveError::NoSave { path: path.clone() }));
+        assert!(is_missing(&SaveError::Io {
+            path,
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        }));
+        assert!(!is_missing(&SaveError::ChecksumMismatch));
     }
 
     #[test]

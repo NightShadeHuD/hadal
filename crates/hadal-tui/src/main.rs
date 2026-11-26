@@ -152,12 +152,25 @@ fn verify_save(path: &std::path::Path) -> Result<(), String> {
 // ---------------------------------------------------------------------
 
 fn run_tui(cli: &Cli) -> ExitCode {
+    let opts = app::resolve_options(cli);
+
+    // Provision the data directory before any early exit, so a non-TTY launch
+    // (or a lock failure) still leaves the directory in place. An absent
+    // directory is a fresh install, not an error.
+    if let Err(err) = provision_data_dir(&opts.data_dir) {
+        eprintln!(
+            "could not create data directory {}: {}",
+            sanitize(&opts.data_dir.display().to_string()),
+            err
+        );
+        return ExitCode::FAILURE;
+    }
+
     if let Err(err) = ensure_interactive(terminal::is_interactive) {
         eprintln!("{err}");
         return ExitCode::FAILURE;
     }
 
-    let opts = app::resolve_options(cli);
     terminal::install_panic_hook(&opts.data_dir);
 
     let now = app::now_unix();
@@ -200,6 +213,13 @@ fn run_tui(cli: &Cli) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Create the data directory (and parents) before the interactive session
+/// starts. An absent directory is a fresh install, so this is not an error;
+/// a directory that exists as a regular file is reported by the OS error.
+fn provision_data_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
 }
 
 // ---------------------------------------------------------------------
@@ -298,5 +318,38 @@ mod headless_tests {
         .expect("cli");
         execute_headless(&import, import.command.as_ref().expect("command")).expect("import");
         assert!(SavePaths::new(dst.path()).save().exists());
+    }
+
+    #[test]
+    fn provision_creates_absent_data_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let nested = dir.path().join("fresh").join("nested");
+        assert!(!nested.exists());
+        provision_data_dir(&nested).expect("create data dir");
+        assert!(nested.is_dir(), "absent data dir must be created");
+    }
+
+    #[test]
+    fn provision_leaves_existing_dir_intact() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("existing");
+        std::fs::create_dir_all(&path).expect("pre-create");
+        std::fs::write(path.join("save.json"), b"{}").expect("write marker");
+
+        provision_data_dir(&path).expect("idempotent");
+
+        assert!(path.join("save.json").exists(), "contents preserved");
+    }
+
+    #[test]
+    fn provision_reports_file_at_data_dir_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("blocked");
+        std::fs::write(&path, b"not a dir").expect("write file");
+
+        assert!(
+            provision_data_dir(&path).is_err(),
+            "a regular file at the data-dir path must surface as an error"
+        );
     }
 }

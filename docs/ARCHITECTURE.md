@@ -167,8 +167,8 @@ Schema **v1**. Envelope (canonical field order):
   `save.corrupt-<unix>.json`, then the backup is loaded; if both fail, a `NoValidSave` error.
 - **Counter:** `save_counter` is monotonic. A disk counter newer than the in-memory one is
   refused (`NewerSaveOnDisk`), so an older save never clobbers a newer one.
-- **Lock:** `File::try_lock` on `save.lock`; `TryLockError::WouldBlock` maps to
-  `AlreadyRunning`; released when the handle drops.
+- **Lock:** the data directory is created first, then `File::try_lock` on `save.lock`;
+  `TryLockError::WouldBlock` maps to `AlreadyRunning`; released when the handle drops.
 - **Migration:** `MigrationChain` transforms the envelope `Value` before deserialization;
   production v1 ships an empty chain and tests register a synthetic 0→1 step.
 - **Config:** `config.json` is separate, unchecksummed, `#[serde(default)]`,
@@ -203,7 +203,9 @@ then `HADAL_DATA_DIR`, then the platform default. Files: `save.json`, `save.bak.
 - **Data directory** (`app::resolve_options`): explicit `--data-dir` → `HADAL_DATA_DIR` →
   platform default; config is loaded and CLI overrides applied.
 - **Lock and load:** acquire the `save.lock` (skip for `--demo`), load primary/backup,
-  handle future-schema and corruption, apply offline, then save once.
+  handle future-schema and corruption, apply offline, then save once. An absent save file is a
+  typed `NoSave` (fresh install) and an empty directory boots to the briefing; `--demo`
+  creates nothing.
 - **Fixed-step loop:** `STEP = 100 ms`, `MAX_STEPS = 20` per frame, `POLL = 33 ms`,
   `FRAME = 33 ms` (≈30 FPS), `AUTOSAVE = 30 s`, `GAP = 2 s`. A gap above `GAP` routes through
   offline catch-up; otherwise fixed 100 ms ticks are accumulated. Autosave fires every 30 s

@@ -22,7 +22,7 @@ expression: "draw(80, 24, &ui)"
 ││  Achievement  A one-time milestone worth a permanent +1% output.           ││
 ││                                                                            ││
 ││VERSION                                                                     ││
-││  HADAL v0.1.1                                                              ││
+││  HADAL v0.1.2                                                              ││
 ││Up/Down scroll   PgUp/PgDn page   Esc close                                 ││
 │└────────────────────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────────────────┘

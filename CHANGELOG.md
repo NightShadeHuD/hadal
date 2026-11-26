@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-11-26
+
+### Fixed
+
+- A brand-new `--data-dir` (including nested paths) now works on first launch: the directory
+  is created before the lock is acquired.
+- Startup errors name the data-directory path and the reason (a regular file in the way, or a
+  directory that cannot be created).
+- An absent save directory is treated as a fresh install (`NoSave`) rather than an I/O error;
+  an empty directory boots to the briefing.
+- Exporting to a missing parent directory reports the path.
+
 ## [0.1.1] - 2026-11-26
 
 ### Added

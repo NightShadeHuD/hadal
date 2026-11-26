@@ -172,6 +172,12 @@ pub enum SaveError {
     /// The current save exists but could not be parsed for its counter.
     #[error("current save is unreadable; refusing to overwrite it")]
     UnreadableCurrent,
+    /// No save files exist in the data directory.
+    #[error("no save found in {path}")]
+    NoSave {
+        /// Data directory searched.
+        path: PathBuf,
+    },
     /// Copying the current save to the backup failed.
     #[error("backup copy failed: {0}")]
     BackupFailed(#[source] std::io::Error),
@@ -207,6 +213,10 @@ fn io_err(path: &Path, source: std::io::Error) -> SaveError {
         path: path.to_path_buf(),
         source,
     }
+}
+
+fn is_not_found(err: &SaveError) -> bool {
+    matches!(err, SaveError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -417,7 +427,20 @@ impl SaveStore {
                                 }),
                             })
                         }
-                        Err(backup_err) => Err(backup_err),
+                        Err(backup_err) => {
+                            // A truly nonexistent data directory gets the typed
+                            // NoSave signal. An existing but empty directory keeps
+                            // the legacy missing-file signal so the TUI's existing
+                            // fresh-install path continues to work (the lock now
+                            // creates the directory before load).
+                            if is_not_found(&backup_err) && !self.paths.dir().exists() {
+                                Err(SaveError::NoSave {
+                                    path: self.paths.dir().to_path_buf(),
+                                })
+                            } else {
+                                Err(backup_err)
+                            }
+                        }
                     }
                 } else {
                     Err(primary_err)
@@ -526,15 +549,39 @@ impl SaveStore {
     ///
     /// # Errors
     ///
-    /// Returns I/O or encoding errors.
+    /// Returns a typed [`SaveError::Io`] naming `path` when the parent
+    /// directory is missing or not a directory; export never creates parents.
+    /// Encoding failures are also reported.
     pub fn export_to_path(
         &mut self,
         state: &GameState,
         path: &Path,
         now_unix: u64,
     ) -> Result<SaveInfo, SaveError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            match std::fs::metadata(parent) {
+                Ok(meta) if meta.is_dir() => {}
+                Ok(_) => {
+                    return Err(io_err(
+                        path,
+                        std::io::Error::new(
+                            std::io::ErrorKind::NotADirectory,
+                            format!("export parent is not a directory: {}", parent.display()),
+                        ),
+                    ));
+                }
+                Err(err) => {
+                    return Err(io_err(
+                        path,
+                        std::io::Error::new(
+                            err.kind(),
+                            format!("export parent is unavailable: {}: {err}", parent.display()),
+                        ),
+                    ));
+                }
+            }
         }
         let counter = self.counter.saturating_add(1);
         let envelope = Envelope::sealed(state, now_unix, counter);
@@ -1081,6 +1128,87 @@ mod tests {
         assert_eq!(loaded, Config::default());
         assert!(matches!(warning, Some(ConfigWarning::Corrupt { .. })));
         assert!(path.exists());
+    }
+
+    #[test]
+    fn test_lock_creates_nested_dir_and_rejects_regular_file() {
+        let base = tempdir();
+        let nested = base.path().join("a").join("b").join("c");
+        assert!(!nested.exists());
+        let lock = SaveLock::acquire(&nested).unwrap();
+        assert!(nested.is_dir(), "acquire must create the data directory");
+        assert!(matches!(
+            SaveLock::acquire(&nested),
+            Err(LockError::AlreadyRunning)
+        ));
+        drop(lock);
+        // Dropping releases the lock.
+        let reopened = SaveLock::acquire(&nested).unwrap();
+        drop(reopened);
+
+        let file = base.path().join("regular_file");
+        write_bytes(&file, b"not a directory");
+        let err = SaveLock::acquire(&file).unwrap_err();
+        match err {
+            LockError::NotADirectory { path } => assert_eq!(path, file),
+            other => panic!("expected NotADirectory, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_save_into_fresh_dir_then_load() {
+        let base = tempdir();
+        let dir = base.path().join("fresh").join("nested");
+        assert!(!dir.exists());
+        let mut store = SaveStore::new(&dir);
+        let state = sample_state(3);
+        store.save(&state, 10).unwrap();
+        assert!(dir.is_dir(), "save must create the data directory");
+        let loaded = store.load(11).unwrap();
+        assert_eq!(state_digest(&loaded.state), state_digest(&state));
+    }
+
+    #[test]
+    fn test_export_missing_parent_is_typed_with_path() {
+        let base = tempdir();
+        let mut store = SaveStore::new(base.path().join("data"));
+        let path = base.path().join("missing").join("deeper").join("out.json");
+        let err = store
+            .export_to_path(&sample_state(1), &path, 1)
+            .unwrap_err();
+        match err {
+            SaveError::Io { path: named, .. } => assert_eq!(named, path),
+            other => panic!("expected Io naming the export path, got {other:?}"),
+        }
+        assert!(!base.path().join("missing").exists());
+    }
+
+    #[test]
+    fn test_import_into_fresh_dir() {
+        let base = tempdir();
+        let source_path = base.path().join("import.json");
+        let state = sample_state(9);
+        let mut exporter = SaveStore::new(base.path().join("unused"));
+        exporter.export_to_path(&state, &source_path, 1).unwrap();
+
+        let fresh = base.path().join("newdata").join("sub");
+        assert!(!fresh.exists());
+        let mut store = SaveStore::new(&fresh);
+        let imported = store.import_from_path(&source_path, 20).unwrap();
+        assert_eq!(state_digest(&imported), state_digest(&state));
+        assert!(fresh.is_dir(), "import must create the data directory");
+        let loaded = store.load(20).unwrap();
+        assert_eq!(state_digest(&loaded.state), state_digest(&state));
+    }
+
+    #[test]
+    fn test_load_missing_dir_is_no_save() {
+        let base = tempdir();
+        let dir = base.path().join("absent");
+        let mut store = SaveStore::new(&dir);
+        let err = store.load(1).unwrap_err();
+        assert!(matches!(err, SaveError::NoSave { .. }), "{err:?}");
+        assert!(!dir.exists());
     }
 
     #[test]

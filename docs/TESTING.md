@@ -51,14 +51,14 @@ Measured (debug unless noted):
 
 | Suite | Tests |
 |---|---|
-| `hadal-core --lib` | 189 |
-| `hadal` (TUI + headless) | 160 |
+| `hadal-core --lib` | 194 |
+| `hadal` (TUI + headless) | 167 |
 | `hadal-sim` | 8 |
 | `pacing` (release) | 1 |
-| **Total** | **358** |
+| **Total** | **370** |
 
 `tools/test-floor.txt` currently reads `247`. The floor may only **rise**; the gate refuses a
-count below it, and the infra worker raises it to the measured **358**.
+count below it, and the infra worker raises it to the measured **370**.
 
 The `pacing` integration test takes **26.69 s in debug** but **1.73 s in release**; the gate
 runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
@@ -109,6 +109,11 @@ selection explainers (`selection_lines_name_cost_and_effect`); help sections and
 | Second instance hits the lock and reports a friendly error | `app::tests::second_instance_reports_friendly_lock_error`; `save::tests::test_lock_acquire_twice_and_release_on_drop` |
 | Atomic write + backup, no temp left behind | `save::tests::test_atomic_write_backup_and_no_temp` |
 | Backup-copy failure aborts and keeps current | `save::tests::test_backup_copy_failure_aborts_and_keeps_current` |
+| Nested nonexistent `--data-dir` created on first launch | `app::tests::nested_nonexistent_data_dir_starts_fresh`; `save::tests::test_lock_creates_nested_dir_and_rejects_regular_file` |
+| Empty save directory is a fresh install | `app::tests::empty_data_dir_stays_fresh_install`; `app::tests::no_save_and_missing_files_are_fresh_install`; `save::tests::test_load_missing_dir_is_no_save` |
+| Save/import into a fresh directory | `save::tests::test_save_into_fresh_dir_then_load`; `save::tests::test_import_into_fresh_dir` |
+| Data dir is a regular file or cannot be created | `app::tests::regular_file_data_dir_is_a_friendly_error`; `app::tests::create_dir_failure_is_a_friendly_error`; `app::tests::data_dir_error_paths_are_sanitized` |
+| Demo creates no data dir or lock | `app::tests::demo_does_not_create_data_dir_or_lock` |
 | Control-character sanitisation of external strings | `sanitize::tests::*` |
 | ASCII / mono modes | `sonar_80x24_ascii`, `sonar_100x30_ascii`, `sonar_80x24_mono` |
 | Reduce motion keeps information, drops animation | `reduce_motion_disables_animations_not_state`, `reduce_motion_descent_is_instant`, `dive_duration_progress_and_reduce_motion` |
