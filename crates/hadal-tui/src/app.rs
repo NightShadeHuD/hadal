@@ -1892,6 +1892,12 @@ impl App {
         self.last_time = now;
         self.session.advance_boot(now);
 
+        // The boot intro animates (radar sweep, wave, beat stages) so it must
+        // redraw every frame while active, independent of the gameplay block.
+        if !self.session.boot_done(now) {
+            self.dirty = true;
+        }
+
         if self.session.boot_done(now) {
             if delta > GAP {
                 if self.session.dive.is_some() {
@@ -3657,6 +3663,66 @@ mod tests {
         assert_eq!(h.app.session.engine.tutorial().index, 4);
         let (text, _until) = h.app.session.tutorial_nudge.clone().expect("nudge set");
         assert_eq!(text, "PRESS u", "step 4 expects u (Enter when focused)");
+    }
+
+    #[test]
+    fn boot_stages_redraw_and_reveal_beats() {
+        use hadal_core::content::story::BOOT_BEATS;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let start = Instant::now();
+        let mut session = Session::start(&options(dir.path()), 1_000).expect("fresh session");
+        session.reduce_motion = false;
+        session.boot = Boot::New { started: start };
+        let mut h = Harness::new(App::new_at(session, start), start);
+
+        // While the boot intro is active the frame is dirty even before the
+        // first draw, so the animating intro repaints every tick.
+        assert!(
+            h.app.should_redraw(start),
+            "boot must request a redraw before the first frame"
+        );
+
+        // ~900 ms: stage 1 — beat 0 only. tick() then render() must show it.
+        h.now = start + Duration::from_millis(900);
+        h.app.tick(h.now);
+        assert!(
+            h.app.should_redraw(h.now),
+            "boot tick must mark the frame dirty"
+        );
+        h.render();
+        let text = h.text();
+        assert!(text.contains(BOOT_BEATS[0]), "stage 1 beat 0: {text}");
+        assert!(
+            !text.contains(BOOT_BEATS[1]),
+            "stage 1 hides beat 1: {text}"
+        );
+
+        // ~1500 ms: stage 2 — beats 0 and 1, not 2.
+        h.now = start + Duration::from_millis(1500);
+        h.app.tick(h.now);
+        h.render();
+        let text = h.text();
+        assert!(text.contains(BOOT_BEATS[0]), "stage 2 beat 0: {text}");
+        assert!(text.contains(BOOT_BEATS[1]), "stage 2 beat 1: {text}");
+        assert!(
+            !text.contains(BOOT_BEATS[2]),
+            "stage 2 hides beat 2: {text}"
+        );
+
+        // ~2100 ms: stage 3 — all three beats.
+        h.now = start + Duration::from_millis(2100);
+        h.app.tick(h.now);
+        h.render();
+        let text = h.text();
+        for (i, beat) in BOOT_BEATS.iter().enumerate() {
+            assert!(text.contains(beat), "stage 3 beat {i}: {text}");
+        }
+
+        // ~2600 ms: the boot is over and SONAR is shown.
+        h.now = start + Duration::from_millis(2600);
+        h.app.tick(h.now);
+        assert_eq!(h.app.session.screen(h.now), Screen::Sonar);
     }
 
     #[test]
