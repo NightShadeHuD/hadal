@@ -124,9 +124,9 @@ manual actions are credited. `elapsed = max(0, now_unix - saved_at_unix)`;
 | TUI | insta goldens at 80×24, 100×30, 140×40; overlays; boot; mono/ASCII; keymap; too-small; terminal restore; E2E session; resize storm |
 | CI | fmt, clippy `-D warnings`, tests, pacing, MSRV, `cargo-deny`, release builds |
 
-Measured counts: core **210**, TUI **229**, sim **8**, and the release pacing test **1** — total
-**448**. `tools/test-floor.txt` currently reads `448`; the floor may only rise, and the infra
-worker raises it to the measured **448** (the gate refuses a count below the floor). Every new
+Measured counts: core **210**, TUI **230**, sim **8**, and the release pacing test **1** — total
+**449**. `tools/test-floor.txt` currently reads `449`; the floor may only rise, and the infra
+worker raises it to the measured **449** (the gate refuses a count below the floor). Every new
 mechanic gets a unit test; every save change gets a round-trip and a migration fixture;
 every UI change updates its goldens. Pacing is a release-mode integration test, not an
 `#[ignore]`d manual script. No tautologies or source-text assertions.

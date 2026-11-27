@@ -52,13 +52,13 @@ Measured (debug unless noted):
 | Suite | Tests |
 |---|---|
 | `hadal-core --lib` | 210 |
-| `hadal` (TUI + headless) | 229 |
+| `hadal` (TUI + headless) | 230 |
 | `hadal-sim` | 8 |
 | `pacing` (release) | 1 |
-| **Total** | **448** |
+| **Total** | **449** |
 
-`tools/test-floor.txt` currently reads `448`. The floor may only **rise**; the gate refuses a
-count below it, and the infra worker raises it to the measured **448**.
+`tools/test-floor.txt` currently reads `449`. The floor may only **rise**; the gate refuses a
+count below it, and the infra worker raises it to the measured **449**.
 
 The `pacing` integration test takes **26.69 s in debug** but **1.73 s in release**; the gate
 runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
@@ -81,7 +81,7 @@ TUI layout goldens use **insta** (`=1.49.0`) with a `TestBackend` at three sizes
 - `offline_summary_80x24`, `import_80x24`, `reset_80x24`, `too_small_79x24`
 - `demo_graphical_100x30`
 
-Note: the gate receipt's `tests=448` counts the pacing test via `--list` (it appears in `cargo test --workspace --all-features -- --list`); the default gate does not execute pacing — it requires `--release-pacing`.
+Note: the gate receipt's `tests=449` counts the pacing test via `--list` (it appears in `cargo test --workspace --all-features -- --list`); the default gate does not execute pacing — it requires `--release-pacing`.
 
 - Change a screen or layout, then regenerate with `INSTA_UPDATE=always cargo test -p hadal`.
 - Inspect the resulting `.snap` diffs before committing; goldens verify layout structure and

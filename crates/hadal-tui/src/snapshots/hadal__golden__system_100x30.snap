@@ -2,7 +2,7 @@
 source: crates/hadal-tui/src/golden.rs
 expression: "draw(100, 30, &ui)"
 ---
-┌ HADAL ── SYSTEM ─────────────────────────────────────────────────────────── v0.2.0  ── RELAY K-9 ┐
+┌ HADAL ── SYSTEM ─────────────────────────────────────────────────────────── v0.2.1  ── RELAY K-9 ┐
 │ 1 SONAR   2 DESCENT   3 ARCHIVE  [4 SYSTEM]                                                      │
 │SETTINGS                                                                                          │
 │> THEME                abyss                                                                      │
@@ -29,6 +29,6 @@ expression: "draw(100, 30, &ui)"
 │SAVE PATH  data/save.json                                                                         │
 │STATUS     SAVED 12s ago                                                                          │
 │s save   e export   i import   R reset                                                            │
-│HADAL v0.2.0   -   credits: The HADAL Authors                                                     │
+│HADAL v0.2.1   -   credits: The HADAL Authors                                                     │
 │CONTROLS  ↑↓ focus  Enter change  t toggle  Esc back  ? manual                                    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-27
+
+### Fixed
+
+- Boot intro now repaints while active, so the three `BOOT_BEATS` reveal at 800/1400/2000 ms
+  and the radar/wave animate. `App::tick` marks the frame dirty every tick during boot instead
+  of gating redraw on `boot_done`. Regression test `boot_stages_redraw_and_reveal_beats`
+  asserts the rendered buffer at 900/1500/2100 ms.
+
 ## [0.2.0] - 2026-11-27
 
 ### Added
