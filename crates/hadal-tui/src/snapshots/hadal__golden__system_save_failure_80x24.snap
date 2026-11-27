@@ -2,7 +2,7 @@
 source: crates/hadal-tui/src/golden.rs
 expression: "draw(80, 24, &ui)"
 ---
-┌ HADAL ── SYSTEM ─────────────────────────────────────── v0.2.1  ── RELAY K-9 ┐
+┌ HADAL ── SYSTEM ─────────────────────────────────────── v0.2.2  ── RELAY K-9 ┐
 │ 1 SONAR   2 DESCENT   3 ARCHIVE  [4 SYSTEM]                                  │
 │SETTINGS                                                                      │
 │> THEME                abyss                                                  │

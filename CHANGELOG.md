@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-27
+
+### Fixed
+
+- Default export wrote to a missing `exports/` directory; it is now provisioned at start.
+- `--demo` wrote `config.json` and could contaminate real sessions; config persistence is disabled in demo.
+- `verify` rejected valid v1 saves (it re-encoded instead of checking stored bytes) and bypassed the 4 MiB cap; it now verifies stored-bytes checksums, reports the stored schema, and enforces the cap.
+- Toast/banner overlays erased the frame border, footer and coach band; they now draw inside the frame.
+- Y/N confirmation dialogs were lowercase-only; `Y`/`N` are now accepted.
+- `q` was inert in modals; it now quits them.
+- Reduce-motion contacts still blinked; they now freeze.
+- The offline WELCOME BACK overlay drew over the 400 ms boot; it is now deferred until boot finishes.
+- A stale save temp could linger after SIGKILL; it is removed on start.
+- The replay copy implied a restart; it now reads honestly.
+- The sim's offline era-fathoms metric displayed 0; it now reports the real value.
+- A stale view comment was corrected.
+- `tutorial_active_system_replay_is_immediate` captured the clock once so a second-boundary straddle cannot trip offline catch-up (test determinism).
+
 ## [0.2.1] - 2026-11-27
 
 ### Fixed

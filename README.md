@@ -2,7 +2,7 @@
 
 A terminal-native deep-sea signals incremental. You operate Relay K-9, a derelict station 7,912 m down in the Kermadec Trench, coaxing Echo out of a repeating carrier wave. Each Descent sinks the station 500 m and rewrites the run. The terminal is the station console.
 
-**Status:** v0.2.1 — graphical overhaul and M1 slice (pixel/Canvas foundation, SONAR radar, graphical boot, tutorial coach, DESCENT/ARCHIVE art, input gating); patch fixes boot intro repaint so story beats reveal.
+**Status:** v0.2.2 — graphical overhaul and M1 slice (pixel/Canvas foundation, SONAR radar, graphical boot, tutorial coach, DESCENT/ARCHIVE art, input gating); patch fixes export/verify/demo-isolation/overlay and save-integrity bugs.
 
 ## Your first five minutes
 
