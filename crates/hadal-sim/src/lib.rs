@@ -385,7 +385,7 @@ fn run_offline(hours: u64) -> SimResult {
         first_descent_seconds: None,
         first_availability_seconds: None,
         descents: report.descents,
-        era_fathoms: 0,
+        era_fathoms: report.fathoms_gained,
         lifetime_fathoms: report.fathoms_gained,
         hulls_owned: 0,
         depth_m: 0,
@@ -1184,6 +1184,22 @@ mod tests {
         assert_eq!(report.capped_secs, 0);
         assert_eq!(report.cap_secs, 8 * 3600);
         assert_eq!(report.ticks, 8 * 3600 * TICKS_PER_SECOND);
+    }
+    #[test]
+    fn offline_metric_era_fathoms_matches_report() {
+        // C4 fix: the era_fathoms metric must reflect the real fathoms
+        // gained during the offline run, not a hard-coded zero.
+        let results = run(SimProfile::Offline, &[168]);
+        let metric = &results[0].metrics[0];
+        let report = results[0].offline_report.as_ref().unwrap();
+        assert_eq!(
+            metric.era_fathoms, report.fathoms_gained,
+            "era_fathoms metric must equal fathoms_gained from offline report"
+        );
+        assert_ne!(
+            metric.era_fathoms, 0,
+            "168h offline should gain era fathoms"
+        );
     }
 
     #[test]

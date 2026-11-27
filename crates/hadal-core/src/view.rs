@@ -51,7 +51,7 @@ impl StateView<'_> {
         self.state.meta.fathoms
     }
 
-    /// Fathoms since the last Transmit (the eras passive source).
+    /// Cumulative era fathoms (granted by descents; never resets).
     pub fn era_fathoms(&self) -> u32 {
         self.state.meta.era_fathoms
     }

@@ -219,7 +219,7 @@ fn is_not_found(err: &SaveError) -> bool {
     matches!(err, SaveError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub fn hex_digest(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let digest = Sha256::digest(bytes);
     let digest_bytes: &[u8] = digest.as_ref();
@@ -254,8 +254,11 @@ pub fn checksum_of(envelope: &Envelope) -> String {
 fn verify_checksum(value: &Value, stored: &str) -> bool {
     !stored.is_empty() && canonical_checksum(value) == stored
 }
-
-fn read_capped(path: &Path) -> Result<Vec<u8>, SaveError> {
+/// Reads a file, rejecting anything larger than [`MAX_SAVE_BYTES`].
+///
+/// This is the same size gate used by [`SaveStore::load`], [`import`], and
+/// the CLI `verify` subcommand.
+pub fn read_capped(path: &Path) -> Result<Vec<u8>, SaveError> {
     let meta = std::fs::metadata(path).map_err(|e| io_err(path, e))?;
     if meta.len() > MAX_SAVE_BYTES {
         return Err(SaveError::TooLarge {
@@ -264,6 +267,47 @@ fn read_capped(path: &Path) -> Result<Vec<u8>, SaveError> {
         });
     }
     std::fs::read(path).map_err(|e| io_err(path, e))
+}
+
+/// Verifies a save file by checking the stored bytes against the checksum
+/// stored in the envelope.
+///
+/// Like [`parse_envelope`], this validates the stored bytes exactly: it
+/// checks the format marker, gates on schema version, verifies the checksum
+/// over the raw JSON value (before any migration), then fully deserializes
+/// the envelope (including the migration path for older schemas).
+///
+/// Returns the **stored** schema version, app version, and save counter from
+/// the file header (not the migrated values), so the caller can display the
+/// original metadata alongside the checksum result.
+///
+/// # Errors
+///
+/// Returns [`SaveError::TooLarge`] if the file exceeds 4 MiB,
+/// [`SaveError::FutureSchema`] for unsupported future schemas, and
+/// [`SaveError::ChecksumMismatch`] when the checksum does not match.
+pub fn verify_save_bytes(path: &Path) -> Result<(u32, String, u64), SaveError> {
+    let bytes = read_capped(path)?;
+    // Extract the stored header from the raw JSON before any migration.
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|e| SaveError::InvalidJson(e.to_string()))?;
+    let stored_schema = value
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let stored_app = value
+        .get("app_version")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let stored_counter = value
+        .get("save_counter")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    // Full validation: format gate, checksum, migration, deserialization.
+    let chain = MigrationChain::production();
+    let _envelope = parse_envelope(&bytes, &chain)?;
+    Ok((stored_schema, stored_app, stored_counter))
 }
 
 /// Parses and validates envelope bytes: format, schema gate, migration,

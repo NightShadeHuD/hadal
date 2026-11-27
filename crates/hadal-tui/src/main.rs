@@ -21,8 +21,8 @@ mod golden;
 use std::process::ExitCode;
 
 use clap::Parser;
-use hadal_core::save::{FORMAT_MARKER, SUPPORTED_SCHEMA, SavePaths, checksum_of};
-use hadal_core::{Envelope, SaveStore};
+use hadal_core::SaveStore;
+use hadal_core::save::{FORMAT_MARKER, SavePaths};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
@@ -93,58 +93,22 @@ fn execute_headless(cli: &Cli, command: &Command) -> Result<(), String> {
     }
 }
 
+/// Verifies a save file using the core library's byte-level verification.
+///
+/// This uses [`verify_save_bytes`] which validates the stored bytes exactly
+/// (format marker, schema gate, checksum over raw JSON, full deserialization
+/// with migration), matching what [`parse_envelope`] does for load/import.
 fn verify_save(path: &std::path::Path) -> Result<(), String> {
-    let bytes = std::fs::read(path).map_err(|err| {
-        format!(
-            "cannot read {}: {}",
-            sanitize(&path.display().to_string()),
-            sanitize(&err.to_string())
-        )
-    })?;
+    let (schema, app_version, save_counter) =
+        hadal_core::verify_save_bytes(path).map_err(|err| err.to_string())?;
 
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|err| format!("invalid save JSON: {err}"))?;
+    println!("format: {FORMAT_MARKER}");
+    println!("schema_version: {schema}");
+    println!("app_version: {app_version}");
+    println!("save_counter: {save_counter}");
+    println!("checksum: valid");
 
-    let format = value
-        .get("format")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_owned();
-    if format != FORMAT_MARKER {
-        return Err(format!("not a HADAL save (format: {})", sanitize(&format)));
-    }
-
-    let schema = value
-        .get("schema_version")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as u32;
-    if schema > SUPPORTED_SCHEMA {
-        return Err(format!(
-            "save schema {schema} is newer than supported {SUPPORTED_SCHEMA}; update HADAL"
-        ));
-    }
-
-    let envelope: Envelope =
-        serde_json::from_value(value).map_err(|err| format!("invalid save envelope: {err}"))?;
-    let computed = checksum_of(&envelope);
-    let checksum_ok = computed == envelope.checksum;
-
-    println!("format: {}", sanitize(&envelope.format));
-    println!("schema_version: {}", envelope.schema_version);
-    println!("app_version: {}", sanitize(&envelope.app_version));
-    println!("save_counter: {}", envelope.save_counter);
-    println!("saved_at_unix: {}", envelope.saved_at_unix);
-
-    if checksum_ok {
-        println!("checksum: valid");
-        Ok(())
-    } else {
-        println!(
-            "checksum: MISMATCH (stored {}, computed {computed})",
-            sanitize(&envelope.checksum)
-        );
-        Err("checksum mismatch".to_owned())
-    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------
@@ -239,19 +203,12 @@ fn provision_data_dir(dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod headless_tests {
     use super::*;
+    use hadal_core::Envelope;
     use hadal_core::GameState;
 
     fn write_envelope(path: &std::path::Path, envelope: &Envelope) {
         let bytes = serde_json::to_vec(envelope).expect("serialize envelope");
         std::fs::write(path, bytes).expect("write envelope");
-    }
-
-    #[test]
-    fn verify_accepts_valid_envelope() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("save.json");
-        write_envelope(&path, &Envelope::sealed(&GameState::new(), 1_000, 1));
-        assert!(verify_save(&path).is_ok());
     }
 
     #[test]
@@ -262,6 +219,77 @@ mod headless_tests {
         envelope.checksum = "sha256:0000".to_owned();
         write_envelope(&path, &envelope);
         assert!(verify_save(&path).is_err());
+    }
+
+    #[test]
+    fn verify_accepts_v1_save() {
+        // P1-01: verify must accept a valid v1 (pre-migration) save and
+        // report the stored schema_version (1), not the migrated one (2).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("v1.json");
+        let state = GameState::new();
+        let mut v1 = serde_json::to_value(&state).unwrap();
+        // Remove the tutorial field so it looks like a real v1 save.
+        if let Some(obj) = v1.as_object_mut() {
+            let meta = obj.get_mut("meta").unwrap().as_object_mut().unwrap();
+            meta.remove("tutorial");
+        }
+        let mut envelope = serde_json::json!({
+            "format": "hadal-save",
+            "schema_version": 1,
+            "app_version": hadal_core::save::APP_VERSION,
+            "saved_at_unix": 1000,
+            "save_counter": 1,
+            "state": v1,
+        });
+        // Compute checksum over the envelope minus the checksum field.
+        let checksum_bytes = serde_json::to_vec(&envelope).unwrap();
+        let hex = hadal_core::hex_digest(&checksum_bytes);
+        envelope["checksum"] = format!("sha256:{hex}").into();
+        let bytes = serde_json::to_vec(&envelope).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        assert!(verify_save(&path).is_ok(), "v1 save must verify");
+        // Assert the stored schema is 1 (not migrated to 2).
+        let (schema, _, _) = hadal_core::verify_save_bytes(&path).expect("verify_save_bytes");
+        assert_eq!(schema, 1, "stored schema_version must be 1 for a v1 file");
+    }
+
+    #[test]
+    fn verify_accepts_v2_envelope() {
+        // A v2 (current-schema) sealed envelope must verify and report schema 2.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("v2.json");
+        let envelope = Envelope::sealed(&GameState::new(), 1_000, 1);
+        let bytes = serde_json::to_vec(&envelope).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        assert!(verify_save(&path).is_ok());
+        let (schema, _, _) = hadal_core::verify_save_bytes(&path).expect("verify_save_bytes");
+        assert_eq!(schema, 2, "stored schema_version must be 2 for a v2 file");
+    }
+
+    #[test]
+    fn verify_rejects_tampered_v1_checksum() {
+        // Same v1 save but with a tampered checksum → must fail.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("v1_tampered.json");
+        let state = GameState::new();
+        let mut v1 = serde_json::to_value(&state).unwrap();
+        if let Some(obj) = v1.as_object_mut() {
+            let meta = obj.get_mut("meta").unwrap().as_object_mut().unwrap();
+            meta.remove("tutorial");
+        }
+        let envelope = serde_json::json!({
+            "format": "hadal-save",
+            "schema_version": 1,
+            "app_version": hadal_core::save::APP_VERSION,
+            "saved_at_unix": 1000,
+            "save_counter": 1,
+            "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "state": v1,
+        });
+        let bytes = serde_json::to_vec(&envelope).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        assert!(verify_save(&path).is_err(), "tampered v1 must be rejected");
     }
 
     #[test]
@@ -286,6 +314,22 @@ mod headless_tests {
     fn verify_reports_missing_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         assert!(verify_save(&dir.path().join("absent.json")).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_too_large_file() {
+        // P1-02: verify must enforce the 4 MiB size gate.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("big.json");
+        // Write a file > 4 MiB with minimal JSON so it passes JSON parsing
+        // but is rejected by the size gate.
+        let payload = serde_json::json!({"format":"hadal-save","schema_version":2});
+        let header = serde_json::to_vec(&payload).unwrap();
+        let mut bytes = header.clone();
+        bytes.extend(vec![b' '; 4 * 1024 * 1024 + 1024]);
+        std::fs::write(&path, bytes).unwrap();
+        let err = verify_save(&path).expect_err("must reject oversized file");
+        assert!(err.contains("too large"), "{err}");
     }
 
     #[test]

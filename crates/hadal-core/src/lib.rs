@@ -38,7 +38,7 @@ pub use engine::{Action, ActionError, BuyQuantity, Engine, Event};
 pub use offline::{OfflineReport, simulate_offline};
 pub use save::{
     Config, ConfigWarning, Envelope, LoadWarning, LoadedSave, SaveError, SaveInfo, SaveLock,
-    SaveStore,
+    SaveStore, hex_digest, verify_save_bytes,
 };
 pub use state::GameState;
 pub use view::StateView;
