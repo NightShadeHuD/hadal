@@ -490,6 +490,9 @@ impl Session {
         }
 
         let lock = SaveLock::acquire(&opts.data_dir).map_err(startup_lock_error)?;
+        // Best-effort remove a stale save temp left by a SIGKILL.  Done under the
+        // held lock and before load/save so a half-written temp cannot linger.
+        let _ = std::fs::remove_file(SavePaths::new(&opts.data_dir).temp());
         let mut store = SaveStore::new(&opts.data_dir);
 
         let (engine, saved_at, load_warning) = match store.load(now_unix) {
@@ -579,6 +582,10 @@ impl Session {
                 started: Instant::now(),
             };
         }
+        // Provision the app-owned exports directory so the default export path
+        // always works.  Keep `export_to_path`'s rule of never creating arbitrary
+        // user-typed parents — this only covers the app-owned default.
+        let _ = std::fs::create_dir_all(SavePaths::new(&session.data_dir).exports());
 
         let tutorial = session.engine.tutorial();
         session.tutorial_step = tutorial.index;
@@ -944,6 +951,9 @@ impl Session {
     }
 
     fn replay_tutorial(&mut self, now_unix: u64) {
+        // Reset the tutorial state so the coach reappears; observe_tutorial then
+        // advances to the first unsatisfied step, which the confirmation copy
+        // now describes honestly as "resume from your next unfinished step".
         self.engine.tutorial_replay();
         self.tutorial_step = 0;
         self.tutorial_finished = false;
@@ -1213,6 +1223,9 @@ impl Session {
     }
 
     fn persist_config(&mut self) {
+        if self.demo {
+            return;
+        }
         self.config.theme = self.theme.into();
         self.config.reduce_motion = self.reduce_motion;
         self.config.ascii_only = self.ascii;
@@ -1769,18 +1782,32 @@ impl App {
                     self.dirty = true;
                 } else if self.session.confirm_tutorial_skip {
                     match key.code {
-                        KeyCode::Char('y') => self.session.skip_tutorial(now_unix()),
-                        KeyCode::Char('n') | KeyCode::Esc => {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.session.skip_tutorial(now_unix())
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                             self.session.confirm_tutorial_skip = false;
+                        }
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            self.session.confirm_tutorial_skip = false;
+                            self.session.should_quit = true;
+                            self.session.save_now(now_unix());
                         }
                         _ => {}
                     }
                     self.dirty = true;
                 } else if self.session.confirm_tutorial_replay {
                     match key.code {
-                        KeyCode::Char('y') => self.session.replay_tutorial(now_unix()),
-                        KeyCode::Char('n') | KeyCode::Esc => {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.session.replay_tutorial(now_unix())
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                             self.session.confirm_tutorial_replay = false;
+                        }
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            self.session.confirm_tutorial_replay = false;
+                            self.session.should_quit = true;
+                            self.session.save_now(now_unix());
                         }
                         _ => {}
                     }
@@ -1788,6 +1815,11 @@ impl App {
                 } else if self.session.help {
                     let page = self.session.help_visible.saturating_sub(1).max(1) as isize;
                     match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            self.session.help = false;
+                            self.session.should_quit = true;
+                            self.session.save_now(now_unix());
+                        }
                         KeyCode::Esc => {
                             self.session.help = false;
                             self.session
@@ -1804,12 +1836,33 @@ impl App {
                     self.session.edit_key(key, now_unix());
                     self.dirty = true;
                 } else if self.session.offline_visible {
-                    self.session.offline_visible = false;
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            self.session.offline_visible = false;
+                            self.session.should_quit = true;
+                            self.session.save_now(now_unix());
+                        }
+                        _ => {
+                            self.session.offline_visible = false;
+                        }
+                    }
                     self.dirty = true;
-                } else if self.session.confirm_descent
-                    && !matches!(key.code, KeyCode::Char('y') | KeyCode::Esc)
-                {
-                    // The confirmation owns the keyboard.
+                } else if self.session.confirm_descent {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.session.try_descend(now_unix(), now)
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            self.session.confirm_descent = false;
+                        }
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            self.session.confirm_descent = false;
+                            self.session.should_quit = true;
+                            self.session.save_now(now_unix());
+                        }
+                        _ => {}
+                    }
+                    self.dirty = true;
                 } else if key.code == KeyCode::Enter && self.session.tutorial_offline_step() {
                     self.session.tutorial_acknowledge(now_unix());
                     self.dirty = true;
@@ -2715,6 +2768,8 @@ mod tests {
 
         let engine = Engine::new();
         let mut session = headless(engine, nested.clone(), None);
+        // Config persistence is a real-session concern (demo is a no-op).
+        session.demo = false;
         session.current = ScreenKind::System;
         session.focus = Focus::System(0);
         assert!(session.apply_command(Command::FocusActivate, 1_000));
@@ -3018,8 +3073,9 @@ mod tests {
         assert_eq!(saved.saved_at_unix, now, "immediate save");
         eprintln!("step 9 offline: credited=28800 cap=28800 summary=true");
 
-        // Render the offline summary once.
+        // Render the offline summary once (after the short boot completes).
         let mut h2 = Harness::new(App::new_at(third, Instant::now()), Instant::now());
+        h2.app.session.skip_boot();
         h2.render();
         assert!(h2.text().contains("WELCOME BACK"), "offline summary");
         assert!(h2.text().contains("cap 8h 0m"), "cap reported");
@@ -3482,17 +3538,22 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let opts = options(dir.path());
         let engine = tutorial_engine(6, 0);
+        // Capture the clock once so save and reload share the same second and
+        // offline catch-up sees elapsed == 0. Two separate `now_unix()` calls
+        // can straddle a second boundary, run offline ticks, and auto-advance
+        // the Peak step (6 -> 7).
+        let now = now_unix();
         let mut store = SaveStore::new(dir.path());
-        store.save(engine.state(), now_unix()).expect("seed");
+        store.save(engine.state(), now).expect("seed");
         drop(store);
 
-        let mut session = Session::start(&opts, now_unix()).expect("load");
+        let mut session = Session::start(&opts, now).expect("load");
         assert_eq!(session.engine.tutorial().index, 6);
         assert!(session.tutorial_active());
         // The input gate keeps the tutorial active on early steps, so the
         // SYSTEM replay row is not reachable by keyboard mid-tutorial; exercise
         // the immediate-replay branch directly.
-        session.tutorial_system_action(now_unix());
+        session.tutorial_system_action(now);
         assert!(!session.confirm_tutorial_replay);
         assert_eq!(session.engine.tutorial().index, 0);
     }
@@ -4142,5 +4203,265 @@ mod tests {
         h.app.handle_event(event, h.now);
         h.app.tick(h.now);
         assert_eq!(h.app.session.current, ScreenKind::Sonar);
+    }
+    // --- Regression tests for v0.2.1 audit fixes ---
+
+    #[test]
+    fn r1_exports_dir_is_provisioned_on_start() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let _session = Session::start(&opts, 1_000).expect("start");
+        let exports = SavePaths::new(dir.path()).exports();
+        assert!(exports.is_dir(), "exports dir must exist after start");
+    }
+
+    #[test]
+    fn r1_demo_never_creates_exports_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut opts = options(dir.path());
+        opts.demo = true;
+        let _session = Session::start(&opts, 1_000).expect("demo start");
+        let exports = SavePaths::new(dir.path()).exports();
+        assert!(!exports.exists(), "demo must not create exports dir");
+    }
+
+    #[test]
+    fn r1_export_default_path_writes_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let start = Instant::now();
+        let session = Session::start(&opts, now_unix()).expect("start");
+        let mut h = Harness::new(App::new_at(session, start), start);
+
+        h.key(KeyCode::Char('x')); // skip boot
+        h.key(KeyCode::Char('S')); // skip tutorial
+        h.key(KeyCode::Char('y'));
+        h.key(KeyCode::Char('4')); // SYSTEM
+        h.key(KeyCode::Char('e')); // open EXPORT SAVE
+
+        assert!(h.app.session.edit.is_some(), "export overlay absent");
+        // Submit the pre-filled default path with Enter.
+        h.key(KeyCode::Enter);
+
+        assert!(
+            h.app.session.edit.is_none(),
+            "overlay must close on success: {:?}",
+            h.app.session.edit.map(|e| e.error)
+        );
+        assert!(
+            h.app
+                .session
+                .toasts
+                .iter()
+                .any(|t| t.starts_with("EXPORTED")),
+            "success toast missing: {:?}",
+            h.app.session.toasts
+        );
+        let exports = SavePaths::new(dir.path()).exports();
+        let count = std::fs::read_dir(&exports).expect("exports dir").count();
+        assert!(count >= 1, "export file must be written");
+    }
+
+    #[test]
+    fn l3_demo_persist_config_is_noop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut opts = options(dir.path());
+        opts.demo = true;
+        let mut session = Session::start(&opts, 1_000).expect("demo start");
+        // Toggle settings — in demo this should not write config.json.
+        session.theme = Theme::Mono;
+        session.reduce_motion = false;
+        session.apply_setting();
+        let config_path = SavePaths::new(dir.path()).config();
+        assert!(
+            !config_path.exists(),
+            "demo persist_config must not write config.json"
+        );
+        // No files at all should be created in the data dir.
+        let count = std::fs::read_dir(dir.path()).expect("read_dir").count();
+        assert_eq!(count, 0, "demo must not create files on settings change");
+    }
+
+    #[test]
+    fn l2_skip_accepts_uppercase_y() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let session = Session::start(&opts, 1_000).expect("start");
+        let mut h = Harness::new(App::new_at(session, Instant::now()), Instant::now());
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char('S'));
+        assert!(h.app.session.confirm_tutorial_skip);
+        // Uppercase N cancels.
+        h.key(KeyCode::Char('N'));
+        assert!(!h.app.session.confirm_tutorial_skip);
+        assert!(!h.app.session.engine.tutorial().skipped);
+        // Reopen and confirm with uppercase Y.
+        h.key(KeyCode::Char('S'));
+        assert!(h.app.session.confirm_tutorial_skip);
+        h.key(KeyCode::Char('Y'));
+        assert!(!h.app.session.confirm_tutorial_skip);
+        assert!(h.app.session.engine.tutorial().skipped);
+    }
+
+    #[test]
+    fn l2_replay_accepts_uppercase_y() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut session = headless(Engine::new(), dir.path().to_path_buf(), None);
+        session.confirm_tutorial_replay = true;
+        let mut app = App::new(session);
+        app.handle_event(
+            CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE)),
+            Instant::now(),
+        );
+        assert!(!app.session.confirm_tutorial_replay);
+    }
+
+    #[test]
+    fn l2_descent_accepts_uppercase_y() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let engine = demo_with(|value| {
+            value["run"]["echo"] = serde_json::json!("1000000000");
+        });
+        let mut session = headless(engine, dir.path().to_path_buf(), None);
+        session.current = ScreenKind::Descent;
+        session.confirm_descent = true;
+        // Simulate the handle_event path for uppercase Y.
+        let event = CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE));
+        let mut app = App::new(session);
+        app.handle_event(event, Instant::now());
+        // The handler should have processed the descent confirm.
+        assert!(!app.session.confirm_descent);
+    }
+
+    #[test]
+    fn r2_help_q_quits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let session = Session::start(&opts, 1_000).expect("start");
+        let mut h = Harness::new(App::new_at(session, Instant::now()), Instant::now());
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char('?'));
+        assert!(h.app.session.help);
+        h.app.session.last_save_unix = None;
+        h.key(KeyCode::Char('q'));
+        assert!(!h.app.session.help);
+        assert!(h.app.session.should_quit);
+        assert!(h.app.session.last_save_unix.is_some(), "save attempted");
+    }
+
+    #[test]
+    fn r2_offline_q_quits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let now = 1_700_000_000u64;
+        let saved_at = now - 8 * 3600;
+        let fixture = Engine::new();
+        let mut seed = SaveStore::new(dir.path());
+        seed.save(fixture.state(), saved_at).expect("seed");
+        drop(seed);
+        let session = Session::start(&options(dir.path()), now).expect("start");
+        assert!(session.offline_visible);
+        let mut h = Harness::new(App::new_at(session, Instant::now()), Instant::now());
+        // The offline modal is deferred until the short boot completes.
+        h.app.session.skip_boot();
+        assert!(h.app.session.offline_visible);
+        h.app.session.last_save_unix = None;
+        h.key(KeyCode::Char('q'));
+        assert!(!h.app.session.offline_visible);
+        assert!(h.app.session.should_quit);
+        assert!(h.app.session.last_save_unix.is_some(), "save attempted");
+    }
+
+    #[test]
+    fn r2_descent_confirm_q_quits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let engine = demo_with(|value| {
+            value["run"]["echo"] = serde_json::json!("1000000000");
+        });
+        let mut session = headless(engine, dir.path().to_path_buf(), None);
+        session.current = ScreenKind::Descent;
+        session.confirm_descent = true;
+        let mut app = App::new(session);
+        let event = CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::NONE));
+        app.handle_event(event, Instant::now());
+        assert!(!app.session.confirm_descent);
+        assert!(app.session.should_quit);
+    }
+
+    #[test]
+    fn r2_skip_confirm_q_quits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let session = Session::start(&opts, 1_000).expect("start");
+        let mut h = Harness::new(App::new_at(session, Instant::now()), Instant::now());
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char('S'));
+        assert!(h.app.session.confirm_tutorial_skip);
+        h.app.session.last_save_unix = None;
+        h.key(KeyCode::Char('Q'));
+        assert!(!h.app.session.confirm_tutorial_skip);
+        assert!(h.app.session.should_quit);
+        assert!(h.app.session.last_save_unix.is_some(), "save attempted");
+    }
+
+    #[test]
+    fn r2_edit_q_types_not_quits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut opts = options(dir.path());
+        opts.demo = true;
+        let session = Session::start(&opts, 1_000).expect("demo start");
+        let mut h = Harness::new(App::new_at(session, Instant::now()), Instant::now());
+        h.key(KeyCode::Char('x'));
+        h.key(KeyCode::Char('4'));
+        h.key(KeyCode::Char('e'));
+        assert!(h.app.session.edit.is_some());
+        h.key(KeyCode::Char('q'));
+        // q should be typed into the buffer, not quit.
+        assert!(h.app.session.edit.is_some());
+        assert!(!h.app.session.should_quit);
+    }
+
+    #[test]
+    fn r4_skipped_tutorial_replay_restores_coach() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut session = headless(Engine::new(), dir.path().to_path_buf(), None);
+        session.engine.tutorial_skip();
+        assert!(session.engine.tutorial().skipped);
+        session.replay_tutorial(now_unix());
+        // Replay clears the skipped flag so the coach returns; the run and its
+        // satisfied steps are untouched.
+        assert!(!session.engine.tutorial().skipped);
+        assert_eq!(session.engine.tutorial().index, 0);
+        assert!(!session.tutorial_finished);
+    }
+
+    #[test]
+    fn p1_03_stale_save_tmp_removed_on_start() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Plant a stale temp file.
+        let save_tmp = SavePaths::new(dir.path()).temp();
+        std::fs::write(&save_tmp, "stale").expect("write temp");
+        assert!(save_tmp.exists());
+        let opts = options(dir.path());
+        let _session = Session::start(&opts, 1_000).expect("start");
+        assert!(
+            !save_tmp.exists(),
+            "stale save.json.tmp must be removed on start"
+        );
+    }
+
+    #[test]
+    fn p1_03_live_save_unaffected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let engine = Engine::new();
+        let mut seed = SaveStore::new(dir.path());
+        seed.save(engine.state(), 1_000).expect("seed");
+        drop(seed);
+        // Plant a stale temp.
+        let save_tmp = SavePaths::new(dir.path()).temp();
+        std::fs::write(&save_tmp, "stale").expect("write temp");
+        let opts = options(dir.path());
+        let session = Session::start(&opts, 2_000).expect("start");
+        // Live save must still be loadable.
+        assert!(session.engine.view().total_ticks() > 0);
     }
 }

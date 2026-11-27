@@ -166,8 +166,12 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, ui: &UiState<'_>) 
         let cx = centre_x + cdx * r / 1024;
         let cy = centre_y + cdy * r / 1024;
 
-        let flash = (ui.anim.frame_ms / 90 + i as u64 * 11) % 64 < 32;
-        let col = if flash { p.accent } else { p.text };
+        let col = if ui.anim.reduce_motion {
+            p.accent
+        } else {
+            let flash = (ui.anim.frame_ms / 90 + i as u64 * 11) % 64 < 32;
+            if flash { p.accent } else { p.text }
+        };
         // A 2x2 outline covers exactly the four pixels of the contact block.
         canvas.rect(cx, cy, 2, 2, col);
     }

@@ -346,7 +346,9 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     if ui.coach_active() {
         coach::render(frame, ui, &hits);
     }
-    if let Some(report) = ui.offline {
+    if let Some(report) = ui.offline
+        && !matches!(ui.screen, Screen::Boot { .. })
+    {
         render_offline_summary(frame, report, ui.palette, ui.ascii);
     }
     if let Some(edit) = ui.edit {
@@ -803,16 +805,30 @@ fn kv_line(label: &str, value: &str, palette: Palette) -> Line<'static> {
 fn render_overlays(frame: &mut Frame, ui: &UiState<'_>) {
     let area = frame.area();
     let palette = ui.palette;
-    let mut bottom = area.y + area.height.saturating_sub(1);
+    // Draw inside the frame (x+1, width-2) so side borders are preserved.
+    let inner_x = area.x.saturating_add(1);
+    let inner_w = area.width.saturating_sub(2);
+    if inner_w == 0 {
+        return;
+    }
+    // Stack upward from one row above the footer; if the coach is active,
+    // stay above the coach band so the status/why rows are not covered.
+    let footer_y = area.y + area.height.saturating_sub(2);
+    let ceil = coach::band_rect(ui, area).map(|r| r.y).unwrap_or(footer_y);
+    let top = area.y.saturating_add(1); // first drawable inner row
+    let mut bottom = ceil; // exclusive upper bound while stacking upward
 
-    if let Some(text) = ui.banner
-        && bottom > area.y
-    {
+    let mut draw = |frame: &mut Frame, text: &str, style: Style| {
+        if bottom <= top {
+            return;
+        }
         bottom -= 1;
-        render_line_at(
+        render_line_at(frame, Rect::new(inner_x, bottom, inner_w, 1), text, style);
+    };
+
+    if let Some(text) = ui.banner {
+        draw(
             frame,
-            area,
-            bottom,
             text,
             Style::new()
                 .bg(palette.alert)
@@ -821,37 +837,25 @@ fn render_overlays(frame: &mut Frame, ui: &UiState<'_>) {
         );
     }
     if let Some(text) = ui.notice
-        && bottom > area.y
         && !matches!(ui.screen, Screen::Descent)
     {
-        bottom -= 1;
-        render_line_at(
+        draw(
             frame,
-            area,
-            bottom,
             text,
             Style::new().bg(palette.panel).fg(palette.alert),
         );
     }
     for text in ui.toasts.iter().rev().take(3) {
-        if bottom > area.y {
-            bottom -= 1;
-            render_line_at(
-                frame,
-                area,
-                bottom,
-                text,
-                Style::new().bg(palette.panel).fg(palette.amber),
-            );
-        }
+        draw(
+            frame,
+            text,
+            Style::new().bg(palette.panel).fg(palette.amber),
+        );
     }
 }
 
-fn render_line_at(frame: &mut Frame, area: Rect, y: u16, text: &str, style: Style) {
-    let rect = Rect::new(area.x, y, area.width, 1);
-    // Pad to the full row so a short message cannot leave stale footer cells
-    // beside it.
-    let padded = format!("{text:<width$}", width = area.width as usize);
+fn render_line_at(frame: &mut Frame, rect: Rect, text: &str, style: Style) {
+    let padded = format!("{text:<width$}", width = rect.width as usize);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(padded, style))).style(style),
         rect,

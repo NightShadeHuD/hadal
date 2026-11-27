@@ -1356,3 +1356,196 @@ fn coach_graphical_nudge_80x24() {
     ui.tutorial_nudge = Some("PRESS SPACE");
     insta::assert_snapshot!("coach_graphical_nudge_80x24", draw(80, 24, &ui));
 }
+
+// ---------------------------------------------------------------------
+// v0.2.1 audit render fixes
+// ---------------------------------------------------------------------
+
+#[test]
+fn r6_offline_overlay_hidden_during_boot() {
+    let mut engine = Engine::demo();
+    let report = simulate_offline(&mut engine, 8 * 3600);
+    let anim = Anim::settled(engine.view().echo());
+
+    let mut sonar_ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &anim,
+    );
+    sonar_ui.offline = Some(&report);
+    assert!(
+        draw(80, 24, &sonar_ui).contains("WELCOME BACK"),
+        "offline modal must appear after boot"
+    );
+
+    let mut boot_ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Boot { revealed: 3 },
+        &anim,
+    );
+    boot_ui.offline = Some(&report);
+    assert!(
+        !draw(80, 24, &boot_ui).contains("WELCOME BACK"),
+        "boot must not draw the offline modal"
+    );
+}
+
+#[test]
+fn r4_replay_confirm_copy_is_honest() {
+    let fixture = Fixture::new(Engine::new());
+    let mut ui = coach_ui(&fixture, Screen::Sonar, false);
+    ui.confirm_replay = true;
+    let text = draw(80, 24, &ui);
+    assert!(
+        text.contains("Resume from your next unfinished step?"),
+        "{text}"
+    );
+    assert!(!text.contains("Restart from step 1"), "{text}");
+}
+
+#[test]
+fn l1_toasts_preserve_side_borders_and_footer() {
+    let fixture = Fixture::new(Engine::demo());
+    let baseline = draw_buffer(80, 24, &fixture.ui(Screen::Sonar, false));
+
+    let one = vec!["achievement: first contact".to_string()];
+    let mut ui1 = fixture.ui(Screen::Sonar, false);
+    ui1.toasts = &one;
+    let with_one = draw_buffer(80, 24, &ui1);
+
+    let three = vec![
+        "toast alpha".to_string(),
+        "toast beta".to_string(),
+        "toast gamma".to_string(),
+    ];
+    let mut ui3 = fixture.ui(Screen::Sonar, false);
+    ui3.toasts = &three;
+    let with_three = draw_buffer(80, 24, &ui3);
+
+    for (label, buf) in [("1 toast", &with_one), ("3 toasts", &with_three)] {
+        for y in 0..24 {
+            assert_eq!(
+                buf[(0, y)].symbol(),
+                baseline[(0, y)].symbol(),
+                "{label}: left border broken at row {y}"
+            );
+            assert_eq!(
+                buf[(79, y)].symbol(),
+                baseline[(79, y)].symbol(),
+                "{label}: right border broken at row {y}"
+            );
+        }
+        // Footer row is the last inner row (height - 2).
+        for x in 0..80 {
+            assert_eq!(
+                buf[(x, 22)].symbol(),
+                baseline[(x, 22)].symbol(),
+                "{label}: footer overwritten at col {x}"
+            );
+        }
+    }
+}
+
+#[test]
+fn l1_toasts_do_not_cover_coach_band() {
+    let engine = tutorial_engine(0);
+    let fixture = Fixture::new(engine);
+    let baseline = draw_buffer(80, 24, &coach_ui(&fixture, Screen::Sonar, false));
+
+    let three = vec![
+        "toast alpha".to_string(),
+        "toast beta".to_string(),
+        "toast gamma".to_string(),
+    ];
+    let mut ui = coach_ui(&fixture, Screen::Sonar, false);
+    ui.toasts = &three;
+    let with_toasts = draw_buffer(80, 24, &ui);
+
+    // Coach band rows at 80x24: 17..=21; footer at 22.
+    for y in 17..=21 {
+        for x in 0..80 {
+            assert_eq!(
+                with_toasts[(x, y)].symbol(),
+                baseline[(x, y)].symbol(),
+                "coach band row {y} covered at col {x}"
+            );
+        }
+    }
+    for x in 0..80 {
+        assert_eq!(
+            with_toasts[(x, 22)].symbol(),
+            baseline[(x, 22)].symbol(),
+            "footer covered at col {x}"
+        );
+    }
+}
+
+#[test]
+fn l4_reduce_motion_freezes_contact_flash() {
+    let engine = Engine::demo();
+
+    let mut a0 = anim_with(engine.view().echo(), 0, None);
+    a0.reduce_motion = true;
+    let mut a1 = anim_with(engine.view().echo(), 2880, None);
+    a1.reduce_motion = true;
+    let ui0 = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &a0,
+    );
+    let ui1 = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &a1,
+    );
+    let hits = draw_hits(80, 24, &ui0);
+    let rect = hits.radar.expect("radar rect");
+    let b0 = draw_buffer(80, 24, &ui0);
+    let b1 = draw_buffer(80, 24, &ui1);
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            assert_eq!(
+                b0[(x, y)].fg,
+                b1[(x, y)].fg,
+                "contact style changed under reduce_motion at {x},{y}"
+            );
+        }
+    }
+
+    // Without reduce_motion the same two frames must animate (style differs).
+    let n0 = anim_with(engine.view().echo(), 0, None);
+    let n1 = anim_with(engine.view().echo(), 2880, None);
+    let ui0n = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &n0,
+    );
+    let ui1n = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &n1,
+    );
+    let b0n = draw_buffer(80, 24, &ui0n);
+    let b1n = draw_buffer(80, 24, &ui1n);
+    let mut differs = false;
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            if b0n[(x, y)].fg != b1n[(x, y)].fg {
+                differs = true;
+            }
+        }
+    }
+    assert!(differs, "radar must animate without reduce_motion");
+}

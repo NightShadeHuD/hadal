@@ -653,7 +653,7 @@ pub fn render_replay_confirm(frame: &mut Frame, ui: &UiState<'_>) {
     let inner = overlay_box(frame, area, 52, 7, p, ui.ascii, "REPLAY TUTORIAL?");
     let lines = vec![
         Line::from(Span::styled(
-            "Restart from step 1 of 13?",
+            "Resume from your next unfinished step?",
             Style::new().fg(p.text),
         )),
         Line::from(""),

@@ -23,6 +23,6 @@ expression: "draw(80, 24, &ui)"
 │SAVE PATH  data/save.json                                                     │
 │STATUS     SAVED 12s ago                                                      │
 │s save   e export   i import   R reset                                        │
-│HADAL v0.2.1   -   credits: The HADAL Authors                                 │
-SAVE FAILED: disk full — retrying on next autosave
+│SAVE FAILED: disk full — retrying on next autosave                            │
+│CONTROLS  ↑↓ focus  Enter change  t toggle  Esc back  ? manual                │
 └──────────────────────────────────────────────────────────────────────────────┘
