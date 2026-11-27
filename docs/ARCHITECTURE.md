@@ -154,7 +154,7 @@ Schema **v2** (`SUPPORTED_SCHEMA = 2`). Envelope (canonical field order):
 {
   "format": "hadal-save",
   "schema_version": 2,
-  "app_version": "0.1.3",
+  "app_version": "0.2.0",
   "saved_at_unix": <unix>,
   "save_counter": <u64>,
   "checksum": "sha256:<hex>",
