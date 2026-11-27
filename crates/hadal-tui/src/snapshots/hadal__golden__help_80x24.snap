@@ -4,6 +4,16 @@ expression: "draw(80, 24, &ui)"
 ---
 ┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 7,912 m ── CARRIER 01 ┐
 │┌ HELP ──────────────────────────────────────────────────────────────────────┐│
+││MISSION                                                                     ││
+││  RELAY K-9 sits on the trench wall at 7,912 metres. Its hydrophones        ││
+││  listen for the Carrier: a six-band signal that has repeated for           ││
+││  more than thirty years. The station went quiet, but the signal            ││
+││  never stopped. You are Operator 7, sent to wake K-9 and answer it.        ││
+││  Echo is your currency. Pulse the capacitor, buy generators, and           ││
+││  tune the bands. Matching the Carrier multiplies all output by 1.5.        ││
+││  A Descent clears Echo, generators, upgrades, and tuning. Your             ││
+││  Fathoms, hulls, depth, and logs remain. The Carrier counts. Descend.      ││
+││                                                                            ││
 ││BASICS                                                                      ││
 ││  Echo is this run's currency; generators produce it continuously.          ││
 ││  SPACE pulses the capacitor: 10 s of production per full pulse.            ││
@@ -13,16 +23,6 @@ expression: "draw(80, 24, &ui)"
 ││                                                                            ││
 ││WHAT TO DO NOW                                                              ││
 ││  SPACE  pulse the capacitor. A pulse pays 10 s of production.              ││
-││                                                                            ││
-││CONTROLS                                                                    ││
-││  GLOBAL   1-4 tabs  Tab cycle  ? help  Esc back                            ││
-││           Ctrl+S save  q quit                                              ││
-││  SONAR    Space pulse  f tune  h/H d/D m/M c/C buy                         ││
-││           u chain  arrows focus  Enter buy                                 ││
-││  DESCENT  arrows focus  Enter buy  p then y descend                        ││
-││           +/- governor                                                     ││
-││  ARCHIVE  arrows scroll  PgUp/PgDn page                                    ││
-││  SYSTEM   arrows focus  Enter/Space change  t toggle                       ││
 ││Up/Down scroll   PgUp/PgDn page   Esc close                                 ││
 │└────────────────────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────────────────┘

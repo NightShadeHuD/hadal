@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Graphical overhaul**: redesigned boot sequence (wordmark + radar dome + wave animation, staged beats), SONAR radar scope and carrier strip, signal map art in ARCHIVE.
+- **Story/tutorial depth**: 13-step interactive tutorial in two chapters (FIRST SIGNAL, SECOND SIGNAL) with spotlight coach that waits for each action; narrative text expanded (MISSION, BOOT_BEATS).
+- **DESCENT/ARCHIVE art**: graphical descent confirmation with depth visualization, ARCHIVE signal map, hull schematic with branch grouping.
+- **Input gating**: tutorial actions gated until coach advances; nudge system with expiry and redraw.
+- **Gate and receipt**: `cargo xtask gate` (fmt, clippy, tests, floor, ignore/path/no-network checks, content-digest receipt); pacing via `--release-pacing`, privacy via `cargo xtask privacy`; `gate-status` verifies receipt staleness; `tools/test-floor.txt` may only rise.
+
 ## [0.1.3] - 2026-11-26
 
 ### Added

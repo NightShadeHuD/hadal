@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use hadal_core::BuyQuantity;
 use hadal_core::content::ids::GeneratorId;
+use hadal_core::content::tutorial::TutorialStepId;
 
 /// Maximum commands dequeued per frame.
 pub const MAX_COMMANDS_PER_FRAME: usize = 20;
@@ -221,6 +222,141 @@ impl InputQueue {
     pub fn drain_frame(&mut self) -> Vec<Command> {
         let take = self.pending.len().min(MAX_COMMANDS_PER_FRAME);
         self.pending.drain(..take).collect()
+    }
+}
+
+/// True when `cmd` is permitted while the tutorial is on `step`.
+///
+/// Always allows `Save`, `Quit`, `Help`, and `TutorialSkip` for every step.
+/// `Cancel` is allowed only on the steps that explicitly list it; all other
+/// commands are gated per-step.
+pub fn tutorial_allows(step: TutorialStepId, cmd: Command) -> bool {
+    // Always-allowed commands (every step).
+    if matches!(
+        cmd,
+        Command::Save | Command::Quit | Command::Help | Command::TutorialSkip
+    ) {
+        return true;
+    }
+
+    match step {
+        TutorialStepId::Pulse => {
+            matches!(cmd, Command::Pulse | Command::OpenSonar)
+        }
+        TutorialStepId::FirstGenerator | TutorialStepId::SecondGenerator => {
+            matches!(
+                cmd,
+                Command::Pulse
+                    | Command::OpenSonar
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Max)
+            )
+        }
+        TutorialStepId::Drifter => {
+            matches!(
+                cmd,
+                Command::Pulse
+                    | Command::OpenSonar
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::Max)
+            )
+        }
+        TutorialStepId::Upgrade => {
+            matches!(
+                cmd,
+                Command::Pulse
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::Max)
+                    | Command::TuneNext
+                    | Command::FocusUpgrades
+                    | Command::FocusPrev
+                    | Command::FocusNext
+                    | Command::FocusActivate
+                    | Command::Cancel
+                    | Command::OpenSonar
+            )
+        }
+        TutorialStepId::Tune => {
+            matches!(cmd, Command::Pulse | Command::TuneNext | Command::OpenSonar)
+        }
+        TutorialStepId::Peak => {
+            matches!(
+                cmd,
+                Command::Pulse
+                    | Command::TuneNext
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::SonarMast, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::SonarMast, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::TidalCore, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::TidalCore, BuyQuantity::Max)
+                    | Command::FocusUpgrades
+                    | Command::FocusPrev
+                    | Command::FocusNext
+                    | Command::FocusActivate
+                    | Command::Cancel
+                    | Command::OpenSonar
+            )
+        }
+        TutorialStepId::Descend => {
+            matches!(
+                cmd,
+                Command::OpenDescent
+                    | Command::DescentConfirm
+                    | Command::ConfirmDescent
+                    | Command::Cancel
+            )
+        }
+        TutorialStepId::Hull => {
+            matches!(
+                cmd,
+                Command::OpenSonar
+                    | Command::OpenDescent
+                    | Command::FocusPrev
+                    | Command::FocusNext
+                    | Command::FocusActivate
+                    | Command::Cancel
+            )
+        }
+        TutorialStepId::SecondDescent => {
+            matches!(
+                cmd,
+                Command::Pulse
+                    | Command::TuneNext
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::Drifter, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::SonarMast, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::SonarMast, BuyQuantity::Max)
+                    | Command::Buy(GeneratorId::TidalCore, BuyQuantity::One)
+                    | Command::Buy(GeneratorId::TidalCore, BuyQuantity::Max)
+                    | Command::FocusUpgrades
+                    | Command::FocusPrev
+                    | Command::FocusNext
+                    | Command::FocusActivate
+                    | Command::Cancel
+                    | Command::OpenSonar
+                    | Command::OpenDescent
+                    | Command::DescentConfirm
+                    | Command::ConfirmDescent
+            )
+        }
+        TutorialStepId::System => {
+            matches!(cmd, Command::OpenSystem | Command::Cancel)
+        }
+        TutorialStepId::Manual => {
+            matches!(cmd, Command::Help | Command::Cancel)
+        }
+        TutorialStepId::Offline => {
+            matches!(cmd, Command::Help)
+        }
     }
 }
 
@@ -545,5 +681,317 @@ mod tests {
             KeyEventState::empty(),
         );
         assert_eq!(map_key(key, Mode::Normal), None);
+    }
+
+    #[test]
+    fn tutorial_gate_allows_expected_command_each_step() {
+        use super::TutorialStepId;
+
+        // Save / Quit / Help / TutorialSkip allowed on every step.
+        let always = [
+            Command::Save,
+            Command::Quit,
+            Command::Help,
+            Command::TutorialSkip,
+        ];
+        for step in [
+            TutorialStepId::Pulse,
+            TutorialStepId::FirstGenerator,
+            TutorialStepId::SecondGenerator,
+            TutorialStepId::Drifter,
+            TutorialStepId::Upgrade,
+            TutorialStepId::Tune,
+            TutorialStepId::Peak,
+            TutorialStepId::Descend,
+            TutorialStepId::Hull,
+            TutorialStepId::SecondDescent,
+            TutorialStepId::System,
+            TutorialStepId::Manual,
+            TutorialStepId::Offline,
+        ] {
+            for cmd in &always {
+                assert!(
+                    tutorial_allows(step, *cmd),
+                    "step {step:?} should allow {cmd:?}"
+                );
+            }
+        }
+
+        // Step-specific representative allowed commands.
+        assert!(tutorial_allows(TutorialStepId::Pulse, Command::Pulse));
+        assert!(tutorial_allows(TutorialStepId::Pulse, Command::OpenSonar));
+        assert!(tutorial_allows(
+            TutorialStepId::FirstGenerator,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::FirstGenerator,
+            Command::OpenSonar
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::SecondGenerator,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Max)
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::SecondGenerator,
+            Command::OpenSonar
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::Drifter,
+            Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+        ));
+        assert!(tutorial_allows(TutorialStepId::Drifter, Command::OpenSonar));
+        assert!(tutorial_allows(
+            TutorialStepId::Upgrade,
+            Command::FocusUpgrades
+        ));
+        assert!(tutorial_allows(TutorialStepId::Upgrade, Command::OpenSonar));
+        assert!(tutorial_allows(TutorialStepId::Tune, Command::TuneNext));
+        assert!(tutorial_allows(TutorialStepId::Tune, Command::OpenSonar));
+        assert!(tutorial_allows(
+            TutorialStepId::Peak,
+            Command::Buy(GeneratorId::SonarMast, BuyQuantity::One)
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::Descend,
+            Command::ConfirmDescent
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::Hull,
+            Command::FocusActivate
+        ));
+        assert!(tutorial_allows(
+            TutorialStepId::SecondDescent,
+            Command::Buy(GeneratorId::TidalCore, BuyQuantity::Max)
+        ));
+        assert!(tutorial_allows(TutorialStepId::System, Command::OpenSystem));
+        assert!(tutorial_allows(TutorialStepId::Manual, Command::Help));
+        assert!(tutorial_allows(TutorialStepId::Offline, Command::Help));
+    }
+
+    #[test]
+    fn tutorial_gate_blocks_wrong_command_each_step() {
+        use super::TutorialStepId;
+
+        // Pulse: blocks generator buy, open system, cancel, focus actions.
+        assert!(!tutorial_allows(
+            TutorialStepId::Pulse,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(TutorialStepId::Pulse, Command::OpenSystem));
+        assert!(!tutorial_allows(TutorialStepId::Pulse, Command::Cancel));
+        assert!(!tutorial_allows(TutorialStepId::Pulse, Command::TuneNext));
+
+        // FirstGenerator: blocks Drifter buy, cancel, other screens.
+        assert!(!tutorial_allows(
+            TutorialStepId::FirstGenerator,
+            Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::FirstGenerator,
+            Command::Cancel
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::FirstGenerator,
+            Command::OpenSystem
+        ));
+
+        // SecondGenerator: blocks SonarMast buy, cancel.
+        assert!(!tutorial_allows(
+            TutorialStepId::SecondGenerator,
+            Command::Buy(GeneratorId::SonarMast, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::SecondGenerator,
+            Command::Cancel
+        ));
+
+        // Drifter: blocks TidalCore buy, cancel, focus actions.
+        assert!(!tutorial_allows(
+            TutorialStepId::Drifter,
+            Command::Buy(GeneratorId::TidalCore, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(TutorialStepId::Drifter, Command::Cancel));
+        assert!(!tutorial_allows(
+            TutorialStepId::Drifter,
+            Command::FocusUpgrades
+        ));
+
+        // Upgrade: blocks Hydrophone buy (Ten), open screens, confirm descent.
+        assert!(!tutorial_allows(
+            TutorialStepId::Upgrade,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::Ten)
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::Upgrade,
+            Command::OpenSystem
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::Upgrade,
+            Command::OpenDescent
+        ));
+
+        // Tune: blocks FocusUpgrades, cancel, buy, other screens.
+        assert!(!tutorial_allows(
+            TutorialStepId::Tune,
+            Command::FocusUpgrades
+        ));
+        assert!(!tutorial_allows(TutorialStepId::Tune, Command::Cancel));
+        assert!(!tutorial_allows(
+            TutorialStepId::Tune,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+        ));
+
+        // Peak: blocks OpenSystem, open descent, confirm descent.
+        assert!(!tutorial_allows(TutorialStepId::Peak, Command::OpenSystem));
+        assert!(!tutorial_allows(TutorialStepId::Peak, Command::OpenDescent));
+        assert!(!tutorial_allows(
+            TutorialStepId::Peak,
+            Command::ConfirmDescent
+        ));
+
+        // Descend: blocks buy, pulse, open sonar, open system.
+        assert!(!tutorial_allows(
+            TutorialStepId::Descend,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(TutorialStepId::Descend, Command::Pulse));
+        assert!(!tutorial_allows(
+            TutorialStepId::Descend,
+            Command::OpenSonar
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::Descend,
+            Command::OpenSystem
+        ));
+
+        // Hull: blocks pulse, buy, open system, tune.
+        assert!(!tutorial_allows(TutorialStepId::Hull, Command::Pulse));
+        assert!(!tutorial_allows(
+            TutorialStepId::Hull,
+            Command::Buy(GeneratorId::Drifter, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(TutorialStepId::Hull, Command::OpenSystem));
+        assert!(!tutorial_allows(TutorialStepId::Hull, Command::TuneNext));
+
+        // SecondDescent: blocks Save (allowed via always), OpenSystem, StartReset.
+        assert!(!tutorial_allows(
+            TutorialStepId::SecondDescent,
+            Command::OpenSystem
+        ));
+        assert!(!tutorial_allows(
+            TutorialStepId::SecondDescent,
+            Command::StartReset
+        ));
+
+        // System: blocks Pulse, buy, open sonar, focus.
+        assert!(!tutorial_allows(TutorialStepId::System, Command::Pulse));
+        assert!(!tutorial_allows(
+            TutorialStepId::System,
+            Command::Buy(GeneratorId::Hydrophone, BuyQuantity::One)
+        ));
+        assert!(!tutorial_allows(TutorialStepId::System, Command::OpenSonar));
+        assert!(!tutorial_allows(
+            TutorialStepId::System,
+            Command::FocusUpgrades
+        ));
+
+        // Manual: allows only Help + Cancel (plus always-allowed); blocks everything else.
+        assert!(!tutorial_allows(TutorialStepId::Manual, Command::Pulse));
+        assert!(!tutorial_allows(TutorialStepId::Manual, Command::OpenSonar));
+        assert!(!tutorial_allows(
+            TutorialStepId::Manual,
+            Command::OpenSystem
+        ));
+
+        // Offline: blocks everything except Help and always-allowed.
+        assert!(!tutorial_allows(TutorialStepId::Offline, Command::Pulse));
+        assert!(!tutorial_allows(TutorialStepId::Offline, Command::Cancel));
+        assert!(!tutorial_allows(
+            TutorialStepId::Offline,
+            Command::OpenSonar
+        ));
+    }
+
+    /// The off-screen rule is mechanical: every step whose coach target lives
+    /// on another screen must allow that screen's `Open*` command, and `Cancel`
+    /// is allowed only on the steps that list it.
+    #[test]
+    fn tutorial_gate_matches_owner_tab_and_cancel_table() {
+        use super::TutorialStepId;
+        use hadal_core::content::tutorial::{STEPS, TutorialTarget};
+
+        // Every step, in table order, with its target's owning tab.
+        let steps = [
+            TutorialStepId::Pulse,
+            TutorialStepId::FirstGenerator,
+            TutorialStepId::SecondGenerator,
+            TutorialStepId::Drifter,
+            TutorialStepId::Upgrade,
+            TutorialStepId::Tune,
+            TutorialStepId::Peak,
+            TutorialStepId::Descend,
+            TutorialStepId::Hull,
+            TutorialStepId::SecondDescent,
+            TutorialStepId::System,
+            TutorialStepId::Manual,
+            TutorialStepId::Offline,
+        ];
+        // Cancel is allowed only on these steps.
+        let cancel_steps = [
+            TutorialStepId::Upgrade,
+            TutorialStepId::Peak,
+            TutorialStepId::Descend,
+            TutorialStepId::Hull,
+            TutorialStepId::SecondDescent,
+            TutorialStepId::System,
+            TutorialStepId::Manual,
+        ];
+
+        for step in steps {
+            // Resolve the owner tab from the single tutorial table.
+            let target = STEPS
+                .iter()
+                .find(|s| s.id == step)
+                .map(|s| s.target)
+                .expect("step present in table");
+            let owner = match target {
+                TutorialTarget::PulseBar
+                | TutorialTarget::Generator(_)
+                | TutorialTarget::ChainPanel
+                | TutorialTarget::TuneStrip
+                | TutorialTarget::PeakReadout => Some(Command::OpenSonar),
+                TutorialTarget::Hull(_) | TutorialTarget::DescentTab => Some(Command::OpenDescent),
+                TutorialTarget::SystemTab => Some(Command::OpenSystem),
+                TutorialTarget::HelpKey | TutorialTarget::None => None,
+            };
+            match owner {
+                Some(cmd) => assert!(
+                    tutorial_allows(step, cmd),
+                    "step {step:?} names an off-screen target but blocks {cmd:?}"
+                ),
+                None => {
+                    // No owner tab: none of the Open* tab commands may sneak in.
+                    for cmd in [
+                        Command::OpenSonar,
+                        Command::OpenDescent,
+                        Command::OpenArchive,
+                        Command::OpenSystem,
+                    ] {
+                        assert!(
+                            !tutorial_allows(step, cmd),
+                            "step {step:?} has no owner tab but allows {cmd:?}"
+                        );
+                    }
+                }
+            }
+
+            let cancel_expected = cancel_steps.contains(&step);
+            assert_eq!(
+                tutorial_allows(step, Command::Cancel),
+                cancel_expected,
+                "Cancel gate wrong for {step:?}"
+            );
+        }
     }
 }

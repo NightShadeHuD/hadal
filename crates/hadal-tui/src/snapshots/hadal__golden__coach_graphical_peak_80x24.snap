@@ -1,0 +1,28 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(80, 24, &ui)"
+---
+┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 9,412 m ── CARRIER 03 ┐
+│[1 SONAR]  2 DESCENT   3 ARCHIVE   4 SYSTEM                                   │
+│               ▄▄▄▄▄              │ ECHO █▀▀ ▀▀█ █▀█M                         │
+│             ▄▀ ▄█▄▄▀▄            │      ▀▀█ █▀▀ █ █                          │
+│           ▄▀ ██▄▀▄▀▀ ▀▄          │      ▀▀▀ ▀▀▀ ▀▀▀                          │
+│           █▄█▄█▀█▀██▀▄▀          │ RATE +36.3M/s                             │
+│▲CARRIER 03  TUNED   ----==------ │ PULSE   ████████ 100%  READY              │
+│██████████▀▀▀▀▀▀▀▀▀▀▀▀████████████│ NEXT    1.00B  ████████░░  83%            │
+│▀▀▀▀▀▀▀▀▀▀████████████▀▀▀▀▀▀▀▀▀▀▀▀│ ▶ PEAK 910M  FATHOM 140                   │
+│      GENERATORS OWNED    COST        OUTPUT STATE                            │
+│  h/H Hydrophone    46   6,196  +47,816.99/s MAX                              │
+│  d/D Drifter       28  25,742 +465,696.00/s MAX                              │
+│  m/M Sonar Mast    14 256,784      +4.65M/s MAX                              │
+│  c/C Tidal Core     6   8.25M      +31.1M/s MAX                              │
+│SIGNAL CHAIN   u focus                                                        │
+│  Impedance Match       100 OWNED all production ×2                           │
+│LISTENING                                                                     │
+│  TUTORIAL 07/13 · FIRST SIGNAL                         TARGET PEAK  [S] SKIP │
+│  Reach 1.00M Peak Echo. Buy any rate increase you can afford.                │
+│  Peak is the highest Echo this run; Descent gain scales from it. The NEXT bar│
+│  tracks it.                                                                  │
+│[READY] 2 open DESCENT  PEAK ECHO 910M / 1.00M █████                          │
+│SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit        │
+└──────────────────────────────────────────────────────────────────────────────┘

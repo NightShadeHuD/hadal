@@ -4,10 +4,10 @@ expression: "draw(80, 24, &ui)"
 ---
 ┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 9,412 m ── CARRIER 05 ┐
 │[1 SONAR]  2 DESCENT   3 ARCHIVE   4 SYSTEM                                   │
-│ECHO ▀▀█ █▀▀ ▀▀█ B     PEAK   696B                                            │
-│     ▄▄█ █▄█ █▄▄       FATHOM 140                                             │
-│RATE +366M/s           NEXT   1.00T  ████░░░░░░  43%                          │
-├──────────────────────────────────────────────────────────────────────────────┤
+│               ▄▄▄▄▄              │ ECHO ▀▀█ █▀▀ ▀▀█B                         │
+│            ▄▀▀  █  ▀▀▄           │      ▀▀█ █▀█ █▀▀                          │
+│          ▄▀▀▄▄▀▀█▀▀▀▀▀▀▄         │      ▀▀▀ ▀▀▀ ▀▀▀                          │
+│         ▄▀ ▄▀▀███▄▄██▄ ▀▄        │ RATE +366M/s                              │
 │         ┌ WELCOME BACK ────────────────────────────────────────────┐         │
 │         │AWAY         8h 0m credited of 8h 0m elapsed, cap 168h 0m │         │
 │         │ECHO         +361B                                        │         │
@@ -19,10 +19,10 @@ expression: "draw(80, 24, &ui)"
 │         │any key continues                                         │         │
 │         │                                                          │         │
 │         └──────────────────────────────────────────────────────────┘         │
-│SIGNAL CHAIN   u focus                                                        │
-│  Impedance Match       100 OWNED all production ×2                           │
 │  Sweep Profile         750 OWNED Hydrophones ×3                              │
 │  Cascaded Gain       8,000 OWNED all production ×2                           │
-├──────────────────────────────────────────────────────────────────────────────┤
+│  Stable Drift       40,000 OWNED Drifters ×3                                 │
+│› 2 > p > y  descend for +30 Fathoms and reset the run.                       │
+│LISTENING                                                                     │
 │SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit        │
 └──────────────────────────────────────────────────────────────────────────────┘

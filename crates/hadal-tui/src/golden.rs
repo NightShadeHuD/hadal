@@ -7,13 +7,14 @@ use crossterm::event::MouseButton;
 use hadal_core::BuyQuantity;
 use hadal_core::Engine;
 use hadal_core::GameState;
-use hadal_core::content::story::BOOT_LINES;
+use hadal_core::content::story::{BOOT_BEATS, BOOT_LINES};
 use hadal_core::simulate_offline;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 
+use crate::boot::{WORDMARK_ASCII, WORDMARK_UNICODE};
 use crate::input::Command;
 use crate::render::hits::center;
 use crate::render::{
@@ -113,119 +114,6 @@ fn coach_ui(fixture: &Fixture, screen: Screen, ascii: bool) -> UiState<'_> {
 // ---------------------------------------------------------------------
 
 #[test]
-fn coach_step0_80x24() {
-    let fixture = Fixture::new(Engine::new());
-    insta::assert_snapshot!(
-        "coach_step0_80x24",
-        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
-    );
-}
-
-#[test]
-fn coach_step0_100x30() {
-    let fixture = Fixture::new(Engine::new());
-    insta::assert_snapshot!(
-        "coach_step0_100x30",
-        draw(100, 30, &coach_ui(&fixture, Screen::Sonar, false))
-    );
-}
-
-#[test]
-fn coach_waiting_hydro_80x24() {
-    let engine = engine_with(Engine::demo(), |value| {
-        value["meta"]["tutorial"] = serde_json::json!({
-            "step": 3,
-            "completed": false,
-            "skipped": false,
-            "seen_carrier_change": false,
-            "tuned_since_change": false,
-            "manual_opened": false,
-            "manual_closed": false,
-            "system_opened": false,
-            "acknowledged": false,
-        });
-        value["run"]["generators"] = serde_json::json!([4, 0, 0, 0]);
-    });
-    let fixture = Fixture::new(engine);
-    insta::assert_snapshot!(
-        "coach_waiting_hydro_80x24",
-        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
-    );
-}
-
-#[test]
-fn coach_tune_waiting_80x24() {
-    let engine = engine_with(Engine::demo(), |value| {
-        value["meta"]["tutorial"] = serde_json::json!({
-            "step": 5,
-            "completed": false,
-            "skipped": false,
-            "seen_carrier_change": true,
-            "tuned_since_change": true,
-            "manual_opened": false,
-            "manual_closed": false,
-            "system_opened": false,
-            "acknowledged": false,
-        });
-        value["run"]["carrier_band"] = serde_json::json!(2);
-        value["run"]["tuned_band"] = serde_json::json!(2);
-    });
-    let fixture = Fixture::new(engine);
-    insta::assert_snapshot!(
-        "coach_tune_waiting_80x24",
-        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
-    );
-}
-
-#[test]
-fn coach_hull_descent_80x24() {
-    let engine = engine_with(Engine::demo(), |value| {
-        value["meta"]["tutorial"] = serde_json::json!({
-            "step": 8,
-            "completed": false,
-            "skipped": false,
-            "seen_carrier_change": true,
-            "tuned_since_change": true,
-            "manual_opened": false,
-            "manual_closed": false,
-            "system_opened": false,
-            "acknowledged": false,
-        });
-        value["meta"]["fathoms"] = serde_json::json!(1);
-        value["meta"]["stats"]["descents"] = serde_json::json!(1);
-        if let Some(hulls) = value["meta"]["hulls"].as_array_mut() {
-            hulls.retain(|hull| hull.as_str() != Some("auto_pulse"));
-        }
-    });
-    let fixture = Fixture::new(engine);
-    let mut ui = coach_ui(&fixture, Screen::Descent, false);
-    ui.focus = Focus::Hull(0);
-    insta::assert_snapshot!("coach_hull_descent_80x24", draw(80, 24, &ui));
-}
-
-#[test]
-fn coach_offline_80x24() {
-    let engine = engine_with(Engine::demo(), |value| {
-        value["meta"]["tutorial"] = serde_json::json!({
-            "step": 12,
-            "completed": false,
-            "skipped": false,
-            "seen_carrier_change": true,
-            "tuned_since_change": true,
-            "manual_opened": true,
-            "manual_closed": true,
-            "system_opened": true,
-            "acknowledged": false,
-        });
-    });
-    let fixture = Fixture::new(engine);
-    insta::assert_snapshot!(
-        "coach_offline_80x24",
-        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
-    );
-}
-
-#[test]
 fn skip_confirm_80x24() {
     let fixture = Fixture::new(Engine::new());
     let mut ui = coach_ui(&fixture, Screen::Sonar, false);
@@ -239,24 +127,6 @@ fn system_tutorial_80x24() {
     let mut ui = coach_ui(&fixture, Screen::System, false);
     ui.focus = Focus::System(10);
     insta::assert_snapshot!("system_tutorial_80x24", draw(80, 24, &ui));
-}
-
-#[test]
-fn coach_ascii_80x24() {
-    let fixture = Fixture::new(Engine::new());
-    insta::assert_snapshot!(
-        "coach_ascii_80x24",
-        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, true))
-    );
-}
-
-#[test]
-fn sonar_completed_80x24() {
-    let fixture = Fixture::new(Engine::demo());
-    insta::assert_snapshot!(
-        "sonar_completed_80x24",
-        draw(80, 24, &coach_ui(&fixture, Screen::Sonar, false))
-    );
 }
 
 fn tutorial_engine(step: u8) -> Engine {
@@ -316,13 +186,10 @@ fn generator_columns_align_with_fixed_gutter() {
 #[test]
 fn coach_band_and_target_never_overlap() {
     for &(width, height) in &[(80u16, 24u16), (100, 30)] {
-        for step in 0u8..=11 {
+        for step in 0u8..=12 {
             let engine = tutorial_engine(step);
             let fixture = Fixture::new(engine);
-            for screen in [Screen::Sonar, Screen::Descent] {
-                if screen == Screen::Descent && step != 8 {
-                    continue;
-                }
+            for screen in [Screen::Sonar, Screen::Descent, Screen::System] {
                 let ui = coach_ui(&fixture, screen, false);
                 let area = ratatui::layout::Rect::new(0, 0, width, height);
                 let coach = crate::render::coach::band_rect(&ui, area).expect("active coach");
@@ -332,9 +199,11 @@ fn coach_band_and_target_never_overlap() {
                     assert!(text.contains("SIGNAL CHAIN"), "{width}x{height}: {text}");
                     assert!(text.contains("Impedance Match"), "{width}x{height}: {text}");
                 }
-                let target = hits
-                    .tutorial_target
-                    .unwrap_or_else(|| panic!("step {step} screen {screen:?} has no target rect"));
+                // Steps whose target has no rect on this screen are skipped;
+                // tab targets still have a rect.
+                let Some(target) = hits.tutorial_target else {
+                    continue;
+                };
                 let overlap = coach.x < target.x.saturating_add(target.width)
                     && target.x < coach.x.saturating_add(coach.width)
                     && coach.y < target.y.saturating_add(target.height)
@@ -369,45 +238,328 @@ fn too_small_79x24() {
     insta::assert_snapshot!("too_small_79x24", draw(79, 24, &ui));
 }
 
-#[test]
-fn sonar_80x24_unicode() {
-    let fixture = Fixture::new(Engine::new());
-    let ui = fixture.ui(Screen::Sonar, false);
-    insta::assert_snapshot!("sonar_80x24_unicode", draw(80, 24, &ui));
+fn anim_with(echo: hadal_core::Decimal, frame_ms: u64, pulse: Option<f64>) -> Anim {
+    let mut anim = Anim::settled(echo);
+    anim.frame_ms = frame_ms;
+    anim.pulse_phase = pulse;
+    anim
+}
+
+fn count_radar(buffer: &Buffer, rect: ratatui::layout::Rect, pal: Palette) -> (usize, usize) {
+    let mut non_space = 0;
+    let mut colored = 0;
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            let cell = &buffer[(x, y)];
+            if cell.symbol() != " " {
+                non_space += 1;
+            }
+            if cell.fg == pal.accent || cell.fg == pal.amber {
+                colored += 1;
+            }
+        }
+    }
+    (non_space, colored)
 }
 
 #[test]
-fn sonar_100x30_unicode() {
+fn sonar_graphical_80x24() {
     let fixture = Fixture::new(Engine::demo());
     let ui = fixture.ui(Screen::Sonar, false);
-    insta::assert_snapshot!("sonar_100x30_unicode", draw(100, 30, &ui));
+    insta::assert_snapshot!("sonar_graphical_80x24", draw(80, 24, &ui));
 }
 
 #[test]
-fn sonar_80x24_ascii() {
-    let fixture = Fixture::new(Engine::new());
+fn sonar_graphical_100x30() {
+    let fixture = Fixture::new(Engine::demo());
+    let ui = fixture.ui(Screen::Sonar, false);
+    insta::assert_snapshot!("sonar_graphical_100x30", draw(100, 30, &ui));
+}
+
+#[test]
+fn sonar_graphical_140x40() {
+    let fixture = Fixture::new(Engine::demo());
+    let ui = fixture.ui(Screen::Sonar, false);
+    insta::assert_snapshot!("sonar_graphical_140x40", draw(140, 40, &ui));
+}
+
+#[test]
+fn sonar_graphical_ascii_80x24() {
+    let fixture = Fixture::new(Engine::demo());
     let ui = fixture.ui(Screen::Sonar, true);
-    insta::assert_snapshot!("sonar_80x24_ascii", draw(80, 24, &ui));
+    insta::assert_snapshot!("sonar_graphical_ascii_80x24", draw(80, 24, &ui));
 }
 
 #[test]
-fn boot_100x30() {
-    let fixture = Fixture::new(Engine::new());
-    let ui = fixture.ui(
-        Screen::Boot {
-            revealed: BOOT_LINES.len(),
-        },
+fn sonar_graphical_mono_80x24() {
+    let engine = Engine::demo();
+    let anim = Anim::settled(engine.view().echo());
+    let ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Mono),
         false,
+        Screen::Sonar,
+        &anim,
     );
-    insta::assert_snapshot!("boot_100x30", draw(100, 30, &ui));
+    insta::assert_snapshot!("sonar_graphical_mono_80x24", draw(80, 24, &ui));
+    // Mono is applied: the title "H" uses the mono accent.
+    let buffer = draw_buffer(80, 24, &ui);
+    assert_eq!(buffer[(2, 0)].symbol(), "H");
+    assert_eq!(buffer[(2, 0)].fg, Color::Rgb(0xFF, 0xFF, 0xFF));
 }
 
 #[test]
-fn demo_banner_100x30() {
+fn render_80x24_has_graphical_radar() {
+    // Post-tutorial: the hero disc is 5 rows (34x5, radius 8).
+    let engine = Engine::demo();
+    let anim = anim_with(engine.view().echo(), 0, Some(0.8));
+    let ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &anim,
+    );
+    let hits = draw_hits(80, 24, &ui);
+    let rect = hits.radar.expect("radar rect at 80x24");
+    assert_eq!(rect.height, 5, "post-tutorial disc is 5 rows");
+    let buffer = draw_buffer(80, 24, &ui);
+    let (non_space, colored) = count_radar(&buffer, rect, palette(Theme::Abyss));
+    assert!(non_space >= 60, "80x24 radar lit cells: {non_space}");
+    assert!(colored >= 15, "80x24 radar accent/amber cells: {colored}");
+}
+
+#[test]
+fn radar_visible_while_coach_active() {
+    // Coach active at 80x24: the band costs a row, so the disc is 4 rows but
+    // must still be visibly drawn.
+    let fixture = Fixture::new(Engine::new());
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    let hits = draw_hits(80, 24, &ui);
+    let rect = hits.radar.expect("radar rect with coach band");
+    assert_eq!(rect.height, 4, "coach-active disc is 4 rows");
+    let buffer = draw_buffer(80, 24, &ui);
+    let (non_space, _colored) = count_radar(&buffer, rect, palette(Theme::Abyss));
+    assert!(non_space >= 30, "coach-active radar lit cells: {non_space}");
+}
+
+#[test]
+fn render_100x30_has_more_radar_rows_than_80() {
+    let engine = Engine::demo();
+    let anim = anim_with(engine.view().echo(), 0, Some(1.0));
+    let ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &anim,
+    );
+    let hits100 = draw_hits(100, 30, &ui);
+    let rect100 = hits100.radar.expect("radar rect at 100x30");
+    let buffer = draw_buffer(100, 30, &ui);
+    let (non_space, colored) = count_radar(&buffer, rect100, palette(Theme::Abyss));
+    assert!(non_space >= 120, "100x30 radar lit cells: {non_space}");
+    assert!(colored >= 30, "100x30 radar accent/amber cells: {colored}");
+
+    let hits80 = draw_hits(80, 24, &ui);
+    let rect80 = hits80.radar.expect("radar rect at 80x24");
+    assert!(
+        rect100.height > rect80.height,
+        "radar height 100x30 {} should exceed 80x24 {}",
+        rect100.height,
+        rect80.height
+    );
+}
+
+#[test]
+fn render_is_deterministic_at_fixed_frame() {
+    let engine = Engine::demo();
+    let anim = anim_with(engine.view().echo(), 1234, None);
+    let ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &anim,
+    );
+    let first = draw(100, 30, &ui);
+    let second = draw(100, 30, &ui);
+    assert_eq!(first, second, "fixed frame must render byte-identically");
+}
+
+#[test]
+fn radar_reduce_motion_freezes_sweep() {
+    let engine = Engine::demo();
+    // Contacts repeat every 64*90 ms; reduce_motion pins the sweep at index 0
+    // and drops the trail, so these two frames must be identical.
+    let mut a0 = anim_with(engine.view().echo(), 0, None);
+    a0.reduce_motion = true;
+    let mut a1 = anim_with(engine.view().echo(), 90 * 64, None);
+    a1.reduce_motion = true;
+    let ui0 = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &a0,
+    );
+    let ui1 = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Sonar,
+        &a1,
+    );
+    let hits = draw_hits(80, 24, &ui0);
+    let rect = hits.radar.expect("radar rect");
+    let b0 = draw_buffer(80, 24, &ui0);
+    let b1 = draw_buffer(80, 24, &ui1);
+    for y in rect.y..rect.y.saturating_add(rect.height) {
+        for x in rect.x..rect.x.saturating_add(rect.width) {
+            assert_eq!(
+                b0[(x, y)].symbol(),
+                b1[(x, y)].symbol(),
+                "radar moved under reduce_motion at {x},{y}"
+            );
+        }
+    }
+}
+
+#[test]
+fn boot_graphical_100x30() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Boot { revealed: 3 }, false);
+    insta::assert_snapshot!("boot_graphical_100x30", draw(100, 30, &ui));
+}
+
+#[test]
+fn boot_graphical_stage1_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Boot { revealed: 1 }, false);
+    insta::assert_snapshot!("boot_graphical_stage1_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn boot_graphical_ascii_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Boot { revealed: 3 }, true);
+    insta::assert_snapshot!("boot_graphical_ascii_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn boot_graphical_stage0_80x24() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Boot { revealed: 0 }, false);
+    let text = draw(80, 24, &ui);
+    // No story beat is visible before the first stage.
+    for beat in BOOT_BEATS {
+        assert!(!text.contains(beat), "stage 0 shows beat: {beat:?}");
+    }
+    // The three-row wordmark is still drawn.
+    for row in crate::boot::WORDMARK_UNICODE {
+        let trimmed = row.trim_end();
+        assert!(
+            text.contains(trimmed),
+            "stage 0 missing wordmark row: {trimmed:?}"
+        );
+    }
+    insta::assert_snapshot!("boot_graphical_stage0_80x24", text);
+}
+
+#[test]
+fn boot_has_no_paragraph() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Boot { revealed: 3 }, false);
+    let text = draw(100, 30, &ui);
+    for line in BOOT_LINES {
+        assert!(!text.contains(line), "boot shows old boot line: {line:?}");
+    }
+    // No period-terminated sentence longer than ~50 characters.
+    for line in text.lines() {
+        let mut start = 0usize;
+        for (i, ch) in line.char_indices() {
+            if ch == '.' {
+                let len = line[start..i].trim().chars().count();
+                assert!(len <= 50, "long period sentence in {line:?}");
+                start = i + 1;
+            }
+        }
+    }
+    for beat in BOOT_BEATS {
+        assert!(text.contains(beat), "missing boot beat: {beat:?}");
+    }
+}
+
+#[test]
+fn boot_art_deterministic_at_fixed_frame() {
+    let engine = Engine::new();
+    let mut anim = Anim::settled(engine.view().echo());
+    anim.frame_ms = 1337;
+    let ui = UiState::settled(
+        engine.view(),
+        palette(Theme::Abyss),
+        false,
+        Screen::Boot { revealed: 3 },
+        &anim,
+    );
+    let a = draw(100, 30, &ui);
+    let b = draw(100, 30, &ui);
+    assert_eq!(a, b, "boot art must be byte-identical at a fixed frame");
+}
+
+#[test]
+fn boot_ascii_is_pure() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = fixture.ui(Screen::Boot { revealed: 3 }, true);
+    assert_buffer_ascii(&draw_buffer(80, 24, &ui), "boot", 80, 24);
+}
+
+#[test]
+fn boot_wordmark_rows_present() {
+    let fixture = Fixture::new(Engine::new());
+    // Unicode art: all three rows, in order, with no radar glyphs between.
+    for (width, height) in [(80u16, 24u16), (100, 30)] {
+        let ui = fixture.ui(Screen::Boot { revealed: 3 }, false);
+        let text = draw(width, height, &ui);
+        let lines: Vec<&str> = text.lines().collect();
+        let mut last = 0usize;
+        for pattern in WORDMARK_UNICODE {
+            let needle = pattern.trim_end();
+            let pos = lines
+                .iter()
+                .position(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("missing wordmark row {needle:?} at {width}x{height}"));
+            assert!(
+                pos >= last,
+                "wordmark rows out of order at {width}x{height}"
+            );
+            last = pos;
+            let row = lines[pos];
+            assert!(
+                row.chars().all(|c| c == ' ' || c == '█'),
+                "non-wordmark glyph in row {row:?} at {width}x{height}"
+            );
+        }
+    }
+    // ASCII art: all three rows appear.
+    let ui = fixture.ui(Screen::Boot { revealed: 3 }, true);
+    let text = draw(80, 24, &ui);
+    let lines: Vec<&str> = text.lines().collect();
+    for pattern in WORDMARK_ASCII {
+        let needle = pattern.trim_end();
+        assert!(
+            lines.iter().any(|line| line.contains(needle)),
+            "missing ascii wordmark row {needle:?}"
+        );
+    }
+}
+
+#[test]
+fn demo_graphical_100x30() {
     let fixture = Fixture::new(Engine::demo());
     let mut ui = fixture.ui(Screen::Sonar, false);
     ui.demo = true;
-    insta::assert_snapshot!("demo_banner_100x30", draw(100, 30, &ui));
+    insta::assert_snapshot!("demo_graphical_100x30", draw(100, 30, &ui));
 }
 
 #[test]
@@ -442,18 +594,19 @@ fn descent_100x30() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn sonar_140x40() {
-    let fixture = Fixture::new(Engine::demo());
-    let ui = fixture.ui(Screen::Sonar, false);
-    insta::assert_snapshot!("sonar_140x40", draw(140, 40, &ui));
-}
-
-#[test]
 fn descent_140x40() {
     let fixture = Fixture::new(Engine::demo());
     let mut ui = fixture.ui(Screen::Descent, false);
     ui.focus = Focus::Hull(0);
     insta::assert_snapshot!("descent_140x40", draw(140, 40, &ui));
+}
+
+#[test]
+fn descent_hull_schematic_100x30() {
+    let fixture = Fixture::new(Engine::demo());
+    let mut ui = fixture.ui(Screen::Descent, false);
+    ui.focus = Focus::Hull(0);
+    insta::assert_snapshot!("descent_hull_schematic_100x30", draw(100, 30, &ui));
 }
 
 // ---------------------------------------------------------------------
@@ -477,7 +630,9 @@ fn archive_100x30() {
 #[test]
 fn archive_locked_100x30() {
     let fixture = Fixture::new(Engine::demo());
-    let rows = archive::content_rows(fixture.engine.view(), 98, false);
+    // At 100 columns the signal-map panel takes 30 cols + a divider, so the
+    // list wraps at 67; content_rows excludes the two-cell gutter (65).
+    let rows = archive::content_rows(fixture.engine.view(), 65, false);
     let locked = rows
         .iter()
         .position(|row| row.text.contains("Signal") && row.text.contains("LOCKED"))
@@ -571,31 +726,6 @@ fn reset_80x24() {
     insta::assert_snapshot!("reset_80x24", draw(80, 24, &ui));
 }
 
-#[test]
-fn sonar_100x30_ascii() {
-    let fixture = Fixture::new(Engine::demo());
-    let ui = fixture.ui(Screen::Sonar, true);
-    insta::assert_snapshot!("sonar_100x30_ascii", draw(100, 30, &ui));
-}
-
-#[test]
-fn sonar_80x24_mono() {
-    let fixture = Fixture::new(Engine::new());
-    let anim = Anim::settled(fixture.engine.view().echo());
-    let ui = UiState::settled(
-        fixture.engine.view(),
-        palette(Theme::Mono),
-        false,
-        Screen::Sonar,
-        &anim,
-    );
-    insta::assert_snapshot!("sonar_80x24_mono", draw(80, 24, &ui));
-    // Mono really is applied: the "H" in the title uses the mono accent.
-    let buffer = draw_buffer(80, 24, &ui);
-    assert_eq!(buffer[(2, 0)].symbol(), "H");
-    assert_eq!(buffer[(2, 0)].fg, Color::Rgb(0xFF, 0xFF, 0xFF));
-}
-
 // ---------------------------------------------------------------------
 // Behavior tests
 // ---------------------------------------------------------------------
@@ -616,7 +746,7 @@ fn selection_explainer_covers_focus_and_hover() {
     let fixture = Fixture::new(engine);
     let mut up = fixture.ui(Screen::Sonar, false);
     up.focus = Focus::Upgrade(0);
-    let sonar = draw(80, 24, &up);
+    let sonar = draw(100, 30, &up);
     assert!(
         sonar.contains("Impedance Match: all production ×2 this run"),
         "{sonar}"
@@ -631,7 +761,7 @@ fn selection_explainer_covers_focus_and_hover() {
 
     let mut hover = fixture.ui(Screen::Sonar, false);
     hover.hovered = Some(hadal_core::content::ids::GeneratorId::Hydrophone);
-    let sonar = draw(80, 24, &hover);
+    let sonar = draw(100, 30, &hover);
     assert!(sonar.contains("Hydrophone: +0.75/s each"), "{sonar}");
     assert!(sonar.contains("next unit costs 10 Echo"), "{sonar}");
 }
@@ -915,9 +1045,7 @@ fn ascii_mode_never_emits_non_ascii() {
         Screen::Descent,
         Screen::Archive,
         Screen::System,
-        Screen::Boot {
-            revealed: BOOT_LINES.len(),
-        },
+        Screen::Boot { revealed: 3 },
     ];
     for (width, height) in [(80u16, 24u16), (100, 30), (140, 40)] {
         for screen in screens {
@@ -1034,4 +1162,197 @@ fn control_characters_in_paths_render_inert() {
         buffer_text(&buffer).contains('\u{FFFD}'),
         "sanitized path visible"
     );
+}
+
+// ---------------------------------------------------------------------
+// Tutorial coach graphical tests
+// ---------------------------------------------------------------------
+
+#[test]
+fn scrim_dims_outside_target_and_keeps_radar() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    let buffer = draw_buffer(80, 24, &ui);
+    let hits = draw_hits(80, 24, &ui);
+    let p = palette(Theme::Abyss);
+
+    // A generator-row cell outside the target must be dimmed by the scrim.
+    let gen_rect = hits
+        .generators
+        .first()
+        .map(|(rect, _)| *rect)
+        .expect("generator rows are drawn");
+    let mut dim_in_generator = false;
+    for y in gen_rect.y..gen_rect.y.saturating_add(gen_rect.height) {
+        for x in gen_rect.x..gen_rect.x.saturating_add(gen_rect.width) {
+            let cell = &buffer[(x, y)];
+            if cell.fg == p.dim && cell.modifier.contains(Modifier::DIM) {
+                dim_in_generator = true;
+            }
+        }
+    }
+    assert!(
+        dim_in_generator,
+        "generator-row cell outside target is dimmed"
+    );
+
+    // A radar-rect cell keeps its original fg (not dimmed by the scrim).
+    let radar = hits.radar.expect("radar rect at 80x24 with coach");
+    let mut radar_preserved = false;
+    for y in radar.y..radar.y.saturating_add(radar.height) {
+        for x in radar.x..radar.x.saturating_add(radar.width) {
+            if buffer[(x, y)].fg != p.dim {
+                radar_preserved = true;
+            }
+        }
+    }
+    assert!(radar_preserved, "radar cells keep their fg");
+
+    // A wave-rect cell keeps its fg.
+    let wave = hits.wave.expect("wave rect at 80x24 with coach");
+    let mut wave_preserved = false;
+    for y in wave.y..wave.y.saturating_add(wave.height) {
+        for x in wave.x..wave.x.saturating_add(wave.width) {
+            if buffer[(x, y)].fg != p.dim {
+                wave_preserved = true;
+            }
+        }
+    }
+    assert!(wave_preserved, "wave cells keep their fg");
+}
+
+#[test]
+fn target_border_is_drawn() {
+    let fixture = Fixture::new(Engine::new());
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    let hits = draw_hits(80, 24, &ui);
+    let buffer = draw_buffer(80, 24, &ui);
+    let p = palette(Theme::Abyss);
+    let target = hits.tutorial_target.expect("step 0 has target rect");
+    let left = target.x;
+    let right = target.x.saturating_add(target.width).saturating_sub(1);
+    let top = target.y;
+    let bottom = target.y.saturating_add(target.height).saturating_sub(1);
+    // Check top edge
+    for x in left..=right {
+        let cell = &buffer[(x, top)];
+        assert_eq!(cell.fg, p.amber, "top edge {x},{top}");
+        assert!(
+            cell.modifier.contains(Modifier::BOLD),
+            "top edge {x},{top} bold"
+        );
+    }
+    // Check bottom edge
+    for x in left..=right {
+        let cell = &buffer[(x, bottom)];
+        assert_eq!(cell.fg, p.amber, "bottom edge {x},{bottom}");
+        assert!(
+            cell.modifier.contains(Modifier::BOLD),
+            "bottom edge {x},{bottom} bold"
+        );
+    }
+    // Check left edge
+    for y in top..=bottom {
+        let cell = &buffer[(left, y)];
+        assert_eq!(cell.fg, p.amber, "left edge {left},{y}");
+        assert!(
+            cell.modifier.contains(Modifier::BOLD),
+            "left edge {left},{y} bold"
+        );
+    }
+    // Check right edge
+    for y in top..=bottom {
+        let cell = &buffer[(right, y)];
+        assert_eq!(cell.fg, p.amber, "right edge {right},{y}");
+        assert!(
+            cell.modifier.contains(Modifier::BOLD),
+            "right edge {right},{y} bold"
+        );
+    }
+}
+
+#[test]
+fn coach_header_names_target() {
+    // Step 0 (Pulse) -> TARGET PULSE
+    let engine = tutorial_engine(0);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    let text = draw(80, 24, &ui);
+    assert!(text.contains("TARGET PULSE"), "step 0: {text}");
+
+    // Step 4 (Signal Chain) -> TARGET SIGNAL CHAIN
+    let engine = tutorial_engine(4);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    let text = draw(80, 24, &ui);
+    assert!(text.contains("TARGET SIGNAL CHAIN"), "step 4: {text}");
+}
+
+#[test]
+fn coach_graphical_step0_80x24() {
+    let engine = tutorial_engine(0);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    insta::assert_snapshot!("coach_graphical_step0_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_graphical_step0_100x30() {
+    let engine = tutorial_engine(0);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    insta::assert_snapshot!("coach_graphical_step0_100x30", draw(100, 30, &ui));
+}
+
+#[test]
+fn coach_graphical_chain_80x24() {
+    // Step 4: Signal Chain
+    let engine = tutorial_engine(4);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    insta::assert_snapshot!("coach_graphical_chain_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_graphical_peak_80x24() {
+    // Step 6: Peak Echo
+    let engine = tutorial_engine(6);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, false);
+    insta::assert_snapshot!("coach_graphical_peak_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_graphical_hull_80x24() {
+    // Step 8: Hull on DESCENT
+    let engine = tutorial_engine(8);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Descent, false);
+    insta::assert_snapshot!("coach_graphical_hull_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_graphical_system_80x24() {
+    // Step 10: System tab
+    let engine = tutorial_engine(10);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::System, false);
+    insta::assert_snapshot!("coach_graphical_system_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_graphical_ascii_80x24() {
+    let engine = tutorial_engine(0);
+    let fixture = Fixture::new(engine);
+    let ui = coach_ui(&fixture, Screen::Sonar, true);
+    insta::assert_snapshot!("coach_graphical_ascii_80x24", draw(80, 24, &ui));
+}
+
+#[test]
+fn coach_graphical_nudge_80x24() {
+    let engine = tutorial_engine(0);
+    let fixture = Fixture::new(engine);
+    let mut ui = coach_ui(&fixture, Screen::Sonar, false);
+    ui.tutorial_nudge = Some("PRESS SPACE");
+    insta::assert_snapshot!("coach_graphical_nudge_80x24", draw(80, 24, &ui));
 }

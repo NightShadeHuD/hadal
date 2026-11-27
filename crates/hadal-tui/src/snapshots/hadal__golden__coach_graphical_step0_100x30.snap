@@ -1,0 +1,34 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(100, 30, &ui)"
+---
+┌ HADAL ── RELAY K-9 ───────────────────────────────────────────────── DEPTH 9,412 m ── CARRIER 03 ┐
+│[1 SONAR]  2 DESCENT   3 ARCHIVE   4 SYSTEM                                                       │
+│                     ▄▄▄▄▄▄▄                    │ ECHO ### ### ###M                               │
+│                ▄▄▀▀▀   █   ▀▀▀▄▄               │      #.. ..# #.#                                │
+│             ▄▄▀        █     ▄▄ ▀▄▄            │      ### ### #.#                                │
+│            █▀▄      ▄▄▄█▄▄▄  ▀▀  ▄▀█           │      ..# #.. #.#                                │
+│          ▄▀   ▀▄ ▄▀▀   █   ▀▀▄ ▄▀   ▀▄         │      ### ### ###                                │
+│         ▄▀     ▄▀▄▄▄   █     ▄▀▄▄    ▀▄        │ RATE +36.3M/s                                   │
+│         █     █   ▀▀▄▀▀█▀▀▄▄▀▄████▄   █        │ HIST .......................................... │
+│        █     █    ▄▀▀▄ █ ▄█████████    █       │ ▶ PULSE ██████████████ 100%  READY              │
+│        █▄▄▄▄▄█▄▄▄▄█▄▄▄▀█▀████▀▀▀▀▀▀▄▄▄▄▀       │ PEAK         910M                               │
+│▲CARRIER 03  TUNED                 ----==------ │ FATHOM       140                                │
+│██████████▀▀▀▀▀▀▀▀▀▀▀▀████████████████████▀▀▀▀▀▀│ NEXT    1.00B  ████████░░  83%                  │
+│▀▀▀▀▀▀▀▀▀▀████████████▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀██████│ DESCENT GAIN +16                                │
+│      GENERATORS OWNED    COST        OUTPUT STATE                                                │
+│  h/H Hydrophone    46   6,196  +47,816.99/s MAX                                                  │
+│  d/D Drifter       28  25,742 +465,696.00/s MAX                                                  │
+│  m/M Sonar Mast    14 256,784      +4.65M/s MAX                                                  │
+│  c/C Tidal Core     6   8.25M      +31.1M/s MAX                                                  │
+│SIGNAL CHAIN   u focus                                                                            │
+│  Impedance Match       100 OWNED all production ×2                                               │
+│  Sweep Profile         750 OWNED Hydrophones ×3                                                  │
+│LISTENING                                                                                         │
+│  TUTORIAL 01/13 · FIRST SIGNAL                                            TARGET PULSE  [S] SKIP │
+│  Press SPACE. The capacitor is full: one pulse pays at least 10 Echo.                            │
+│  Echo is the only run currency. A pulse pays 10 s of production, minimum 10; generators add Echo │
+│  every second.                                                                                   │
+│[READY] SPACE pulse the capacitor                                                                 │
+│SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘

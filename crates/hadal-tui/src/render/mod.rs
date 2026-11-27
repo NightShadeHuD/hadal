@@ -1,13 +1,18 @@
 //! Rendering dispatch, shared visual vocabulary, overlays, and too-small screen.
 
 pub mod archive;
+pub mod big;
+pub mod canvas;
 pub mod coach;
 pub mod descent;
 pub mod dive;
 pub mod help;
 pub mod hits;
+pub mod radar;
 pub mod sonar;
+pub mod spark;
 pub mod system;
+pub mod wave;
 
 pub use hits::{HitMap, Tab, command_for_click};
 
@@ -40,9 +45,9 @@ pub const MIN_HEIGHT: u16 = 24;
 /// Which primary screen to draw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
-    /// The boot/title sequence with this many boot lines revealed.
+    /// The boot/title sequence with this many story beats revealed.
     Boot {
-        /// Number of boot lines revealed so far.
+        /// Boot reveal stage (`0..=3`).
         revealed: usize,
     },
     /// The SONAR console.
@@ -100,6 +105,14 @@ pub struct Anim {
     pub carrier_flash: bool,
     /// Per-generator purchase flash.
     pub row_flash: [bool; 4],
+    /// Milliseconds since the session started.
+    pub frame_ms: u64,
+    /// Rate history (64 entries, newest at `head`).
+    pub rate_history: [Decimal; 64],
+    /// Index of the newest entry in `rate_history`.
+    pub rate_head: usize,
+    /// Reduce motion preference.
+    pub reduce_motion: bool,
 }
 
 impl Anim {
@@ -111,6 +124,10 @@ impl Anim {
             pulse_phase: None,
             carrier_flash: false,
             row_flash: [false; 4],
+            frame_ms: 0,
+            rate_history: [Decimal::ZERO; 64],
+            rate_head: 0,
+            reduce_motion: false,
         }
     }
 }
@@ -221,6 +238,8 @@ pub struct UiState<'a> {
     pub confirm_skip: bool,
     /// The replay-tutorial confirmation is open.
     pub confirm_replay: bool,
+    /// Nudge text for the coach status row (e.g. "PRESS SPACE").
+    pub tutorial_nudge: Option<&'a str>,
 }
 
 impl<'a> UiState<'a> {
@@ -258,6 +277,7 @@ impl<'a> UiState<'a> {
             tutorial: None,
             confirm_skip: false,
             confirm_replay: false,
+            tutorial_nudge: None,
         }
     }
 
@@ -306,14 +326,7 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
 
     let mut hits = match ui.screen {
         Screen::Boot { revealed } => {
-            crate::boot::render(
-                frame,
-                ui.view,
-                &ui.palette,
-                crate::glyphs::set(ui.ascii),
-                ui.ascii,
-                revealed,
-            );
+            crate::boot::render(frame, ui, revealed);
             HitMap::default()
         }
         Screen::Sonar => sonar::render(frame, ui),
@@ -331,7 +344,7 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     };
 
     if ui.coach_active() {
-        coach::render(frame, ui);
+        coach::render(frame, ui, &hits);
     }
     if let Some(report) = ui.offline {
         render_offline_summary(frame, report, ui.palette, ui.ascii);

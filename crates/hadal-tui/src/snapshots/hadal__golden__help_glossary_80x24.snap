@@ -4,7 +4,6 @@ expression: "draw(80, 24, &ui)"
 ---
 ┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 9,412 m ── CARRIER 03 ┐
 │┌ HELP ──────────────────────────────────────────────────────────────────────┐│
-││                                                                            ││
 ││GLOSSARY                                                                    ││
 ││  Echo         This run's spendable currency; generators produce it.        ││
 ││  Rate         Echo/s from generators, tiers, upgrades and hulls.           ││
@@ -21,8 +20,9 @@ expression: "draw(80, 24, &ui)"
 ││  Offline      Away time runs at full rate, capped by hull upgrades.        ││
 ││  Achievement  A one-time milestone worth a permanent +1% output.           ││
 ││                                                                            ││
-││VERSION                                                                     ││
-││  HADAL v0.1.3                                                              ││
+││TUTORIAL REFERENCE                                                          ││
+││FIRST SIGNAL                                                                ││
+││  K-9 hears a six-band signal. Learn to pulse, listen, and build the        ││
 ││Up/Down scroll   PgUp/PgDn page   Esc close                                 ││
 │└────────────────────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────────────────┘

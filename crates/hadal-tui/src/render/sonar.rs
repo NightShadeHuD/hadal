@@ -1,21 +1,22 @@
-//! The SONAR console: resource band, scope, pulse, carrier, generators, chain.
+//! The SONAR console: graphical radar/wave top, generators, chain, ticker.
 
 use hadal_core::BuyQuantity;
 use hadal_core::content::ids::{GeneratorId, UpgradeId};
+use hadal_core::content::tutorial::TutorialTarget;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
+use super::{big, radar, spark, wave};
 use crate::glyphs::{self, Glyphs};
 use crate::model;
 use crate::render::{
-    Focus, HitMap, UiState, amount, bar, coach, cost, count, rate_text, render_rule,
-    render_selection, render_tabs, selection_line, titled_frame, window_start,
+    Focus, HitMap, UiState, amount, bar, coach, cost, count, rate_text, render_selection,
+    render_tabs, selection_line, titled_frame, window_start,
 };
 use crate::theme::Palette;
-use hadal_core::content::tutorial::TutorialTarget;
 
 type P = Palette;
 
@@ -43,6 +44,20 @@ fn flash_style(flash: bool, normal: Style, p: P) -> Style {
         Style::new().fg(p.amber).add_modifier(Modifier::BOLD)
     } else {
         normal
+    }
+}
+
+/// `(top_height, left_column_width, wave_height)` for the screen width.
+///
+/// At 80 columns the coach band costs a row, so the hero disc is 4 rows while
+/// the tutorial is active and 5 rows once it is done.
+fn top_metrics(screen_w: u16, coach_active: bool) -> (u16, u16, u16) {
+    if screen_w < 100 {
+        if coach_active { (7, 34, 3) } else { (8, 34, 3) }
+    } else if screen_w < 140 {
+        (12, 48, 3)
+    } else {
+        (18, 68, 4)
     }
 }
 
@@ -86,7 +101,7 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         Rect::new(inner.x, inner.y, inner.width, 1),
         &p,
         ui.screen.tab(),
-        crate::render::coach::target_tab(ui),
+        coach::target_tab(ui),
         ui.ascii,
     );
     let mut content = Rect::new(inner.x, inner.y + 1, inner.width, inner.height - 1);
@@ -99,159 +114,364 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         render_demo_banner(frame, banner, ui);
         content = Rect::new(content.x, content.y + 2, content.width, content.height - 2);
     }
+
+    let screen_w = area.width;
     if ui.coach_active() {
-        render_coach_compact(frame, content, ui, g, &mut hits);
-    } else if area.width >= 100 && area.height >= 30 {
-        render_wide(frame, content, ui, g, &mut hits);
+        layout_with_coach(frame, content, ui, g, &mut hits, screen_w);
     } else {
-        render_narrow(frame, content, ui, g, &mut hits);
+        layout_full(frame, content, ui, g, &mut hits, screen_w);
     }
     hits
 }
 
-fn render_coach_compact(
+/// Post-tutorial layout: body (top + generators + chain), then objective,
+/// optional selection, ticker, and footer.
+fn layout_full(
     frame: &mut Frame,
-    inner: Rect,
+    content: Rect,
     ui: &UiState<'_>,
     g: &Glyphs,
     hits: &mut HitMap,
+    screen_w: u16,
 ) {
+    let selection = usize::from(screen_w >= 100 && selection_line(ui).is_some());
+    let reserved = 3 + selection as u16; // footer + ticker + objective (+ selection)
+    let body_h = content.height.saturating_sub(reserved);
     let rows = Layout::vertical([
-        Constraint::Length(3),                            // resource band
-        Constraint::Length(1),                            // pulse
-        Constraint::Length(1),                            // carrier
-        Constraint::Length(1),                            // generator header
-        Constraint::Length(4),                            // generators
-        Constraint::Min(0),                               // signal chain
-        Constraint::Length(1),                            // rule above coach
-        Constraint::Length(crate::render::coach::HEIGHT), // reserved coach
-        Constraint::Length(1),                            // footer
+        Constraint::Length(body_h),
+        Constraint::Length(1),                // objective
+        Constraint::Length(selection as u16), // selection explainer
+        Constraint::Length(1),                // ticker
+        Constraint::Length(1),                // footer
     ])
-    .areas::<9>(inner);
+    .areas::<5>(content);
 
-    render_band(frame, rows[0], ui, g);
-    render_capacitor(frame, rows[1], ui, g);
-    render_carrier(frame, rows[2], ui);
-    render_generator_header(frame, rows[3], &ui.palette);
-    render_generators(frame, rows[4], ui, hits);
-    render_chain(frame, rows[5], ui, g, hits, false);
-    render_rule(frame, rows[6], &ui.palette, g);
-    render_footer(frame, rows[8], ui);
+    let (top_h, _, _) = top_metrics(screen_w, false);
+    let body = Layout::vertical([
+        Constraint::Length(top_h),
+        Constraint::Length(5), // generator header + 4 rows
+        Constraint::Min(0),    // signal chain
+    ])
+    .areas::<3>(rows[0]);
 
-    let target = ui.coach_target();
-    hits.tutorial_target = match target {
-        Some(TutorialTarget::PulseBar) => Some(rows[1]),
-        Some(TutorialTarget::TuneStrip) => Some(rows[2]),
-        Some(TutorialTarget::PeakReadout) => Some(rows[0]),
-        Some(TutorialTarget::ChainPanel) => Some(Rect::new(rows[5].x, rows[5].y, rows[5].width, 1)),
+    let top = render_top(frame, body[0], ui, g, hits, screen_w, false);
+    let genrows =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(4)]).areas::<2>(body[1]);
+    render_generator_header(frame, genrows[0], &ui.palette);
+    render_generators(frame, genrows[1], ui, hits);
+    let chain = body[2];
+    render_chain(frame, chain, ui, g, hits);
+
+    render_hint(frame, rows[1], ui, g);
+    render_selection(frame, rows[2], ui);
+    render_ticker(frame, rows[3], ui);
+    render_footer(frame, rows[4], ui);
+
+    set_tutorial_target(hits, ui, top, chain, genrows[1], rows[4]);
+}
+
+/// Tutorial layout: body (top + generators + chain + ticker), reserved coach
+/// band, footer.
+fn layout_with_coach(
+    frame: &mut Frame,
+    content: Rect,
+    ui: &UiState<'_>,
+    g: &Glyphs,
+    hits: &mut HitMap,
+    screen_w: u16,
+) {
+    let body_h = content.height.saturating_sub(coach::HEIGHT + 1);
+    let rows = Layout::vertical([
+        Constraint::Length(body_h),
+        Constraint::Length(coach::HEIGHT), // reserved for coach::render
+        Constraint::Length(1),             // footer
+    ])
+    .areas::<3>(content);
+
+    let (top_h, _, _) = top_metrics(screen_w, true);
+    let body = Layout::vertical([
+        Constraint::Length(top_h),
+        Constraint::Length(5),
+        Constraint::Min(0),    // signal chain
+        Constraint::Length(1), // ticker
+    ])
+    .areas::<4>(rows[0]);
+
+    let top = render_top(frame, body[0], ui, g, hits, screen_w, true);
+    let genrows =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(4)]).areas::<2>(body[1]);
+    render_generator_header(frame, genrows[0], &ui.palette);
+    render_generators(frame, genrows[1], ui, hits);
+    let chain = body[2];
+    render_chain(frame, chain, ui, g, hits);
+    render_ticker(frame, body[3], ui);
+    render_footer(frame, rows[2], ui);
+
+    set_tutorial_target(hits, ui, top, chain, genrows[1], rows[2]);
+}
+
+fn render_top(
+    frame: &mut Frame,
+    area: Rect,
+    ui: &UiState<'_>,
+    g: &Glyphs,
+    hits: &mut HitMap,
+    screen_w: u16,
+    coach_active: bool,
+) -> RightHits {
+    let p = ui.palette;
+    let (_, left_w, wave_h) = top_metrics(screen_w, coach_active);
+    let cols = Layout::horizontal([
+        Constraint::Length(left_w),
+        Constraint::Length(1), // divider
+        Constraint::Length(1), // gap after the divider
+        Constraint::Fill(1),   // right content
+    ])
+    .areas::<4>(area);
+    let (left, divider, _gap, right) = (cols[0], cols[1], cols[2], cols[3]);
+
+    // Vertical divider between the disc and the readouts.
+    let lines: Vec<Line> = (0..divider.height)
+        .map(|_| Line::from(Span::styled(g.v_line.to_string(), dim(p))))
+        .collect();
+    frame.render_widget(Paragraph::new(Text::from(lines)), divider);
+
+    // Left column: radar disc over the waveform.
+    let left_rows = Layout::vertical([
+        Constraint::Length(area.height.saturating_sub(wave_h)),
+        Constraint::Length(wave_h),
+    ])
+    .areas::<2>(left);
+    radar::render(frame, left_rows[0], ui);
+    wave::render(frame, left_rows[1], ui);
+    hits.radar = Some(left_rows[0]);
+    hits.wave = Some(left_rows[1]);
+
+    // Right column: echo block, rate, spark/pulse, stats.
+    render_right(frame, right, ui, g, screen_w)
+}
+
+struct RightHits {
+    pulse: Rect,
+    peak: Rect,
+}
+
+fn render_right(
+    frame: &mut Frame,
+    area: Rect,
+    ui: &UiState<'_>,
+    g: &Glyphs,
+    screen_w: u16,
+) -> RightHits {
+    if screen_w < 100 {
+        let rows = Layout::vertical([
+            Constraint::Length(3), // echo
+            Constraint::Length(1), // rate
+            Constraint::Length(1), // pulse
+            Constraint::Length(1), // NEXT
+            Constraint::Length(1), // peak + fathom
+        ])
+        .areas::<5>(area);
+        big::render(frame, rows[0], ui, 3);
+        render_rate(frame, rows[1], ui);
+        render_capacitor(frame, rows[2], ui, g);
+        render_next(frame, rows[3], ui, g);
+        render_peak_fathom(frame, rows[4], ui);
+        // Post-tutorial the column is one row taller; use the spare row.
+        if area.height > 7 {
+            let status = Rect::new(area.x, area.y.saturating_add(7), area.width, 1);
+            let label = if ui.view.carrier_matched() {
+                "SIGNAL TUNED"
+            } else {
+                "SIGNAL LOCKED"
+            };
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    label.to_owned(),
+                    if ui.view.carrier_matched() {
+                        Style::new().fg(ui.palette.accent)
+                    } else {
+                        dim(ui.palette)
+                    },
+                ))),
+                status,
+            );
+        }
+        RightHits {
+            pulse: rows[2],
+            peak: rows[4],
+        }
+    } else if screen_w < 140 {
+        let rows = Layout::vertical([
+            Constraint::Length(5), // echo
+            Constraint::Length(1), // rate
+            Constraint::Length(1), // spark
+            Constraint::Length(1), // pulse
+            Constraint::Length(4), // stats
+        ])
+        .areas::<5>(area);
+        big::render(frame, rows[0], ui, 5);
+        render_rate(frame, rows[1], ui);
+        spark::render(frame, rows[2], ui);
+        render_capacitor(frame, rows[3], ui, g);
+        render_stats(frame, rows[4], ui, g, false);
+        RightHits {
+            pulse: rows[3],
+            peak: Rect::new(rows[4].x, rows[4].y, rows[4].width, 1),
+        }
+    } else {
+        let rows = Layout::vertical([
+            Constraint::Length(5), // echo
+            Constraint::Length(1), // rate
+            Constraint::Length(1), // spark
+            Constraint::Length(1), // pulse
+            Constraint::Length(5), // stats
+            Constraint::Length(4), // breakdown
+            Constraint::Length(1), // spacer
+        ])
+        .areas::<7>(area);
+        big::render(frame, rows[0], ui, 5);
+        render_rate(frame, rows[1], ui);
+        spark::render(frame, rows[2], ui);
+        render_capacitor(frame, rows[3], ui, g);
+        render_stats(frame, rows[4], ui, g, true);
+        render_breakdown(frame, rows[5], ui);
+        RightHits {
+            pulse: rows[3],
+            peak: Rect::new(rows[4].x, rows[4].y, rows[4].width, 1),
+        }
+    }
+}
+
+fn render_rate(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("RATE ".to_owned(), dim(p)),
+            Span::styled(format!("+{}/s", rate_text(ui.view.rate())), accent(p)),
+        ])),
+        area,
+    );
+}
+
+fn next_line(ui: &UiState<'_>, g: &Glyphs) -> Line<'static> {
+    let p = ui.palette;
+    let progress = model::descent_progress(ui.view);
+    let pct = (progress.fraction * 100.0).round() as u32;
+    Line::from(vec![
+        Span::styled("NEXT    ".to_owned(), dim(p)),
+        Span::styled(amount(progress.next), text(p)),
+        Span::styled("  ".to_owned(), dim(p)),
+        Span::styled(bar(progress.fraction, 10, g), accent(p)),
+        Span::styled(format!(" {pct:>3}%"), dim(p)),
+    ])
+}
+
+fn render_next(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
+    frame.render_widget(Paragraph::new(next_line(ui, g)), area);
+}
+
+fn render_peak_fathom(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
+    let target = coach::target_is(ui, TutorialTarget::PeakReadout);
+    let label = if target {
+        format!("{} PEAK ", coach::marker(ui.ascii))
+    } else {
+        "PEAK ".to_owned()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(label, if target { bold_amber(p) } else { dim(p) }),
+            Span::styled(amount(ui.view.peak()), text(p)),
+            Span::styled("  FATHOM ".to_owned(), dim(p)),
+            Span::styled(count(ui.view.fathoms()), amber(p)),
+        ])),
+        area,
+    );
+}
+
+fn render_stats(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs, with_best: bool) {
+    let p = ui.palette;
+    let mut lines = vec![
+        kv("PEAK", amount(ui.view.peak()), p),
+        kv("FATHOM", count(ui.view.fathoms()), p),
+        next_line(ui, g),
+        kv("DESCENT GAIN", format!("+{}", ui.view.descent_gain()), p),
+    ];
+    if with_best {
+        lines.push(kv("BEST PEAK", amount(ui.view.best_peak()), p));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_breakdown(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
+    let bottom = area.y.saturating_add(area.height);
+    for (i, id) in GeneratorId::ALL.iter().enumerate() {
+        let y = area.y.saturating_add(i as u16);
+        if y >= bottom {
+            break;
+        }
+        let contribution = model::generator_contribution(ui.view, *id);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{:<12}", model::generator_name(*id)), dim(p)),
+                Span::styled(format!("+{}/s", rate_text(contribution)), accent(p)),
+            ])),
+            Rect::new(area.x, y, area.width, 1),
+        );
+    }
+}
+
+fn kv(label: &str, value: String, p: P) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:<13}"), dim(p)),
+        Span::styled(value, text(p)),
+    ])
+}
+
+/// Record the coach target rect for the current step (None when inactive).
+fn set_tutorial_target(
+    hits: &mut HitMap,
+    ui: &UiState<'_>,
+    top: RightHits,
+    chain: Rect,
+    gen_rect: Rect,
+    footer: Rect,
+) {
+    let wave_rect = hits.wave;
+    let chain_title = Rect::new(chain.x, chain.y, chain.width, 1);
+    hits.tutorial_target = match ui.coach_target() {
+        Some(TutorialTarget::PulseBar) => Some(top.pulse),
+        Some(TutorialTarget::TuneStrip) => wave_rect,
+        Some(TutorialTarget::PeakReadout) => Some(top.peak),
+        Some(TutorialTarget::ChainPanel) => Some(Rect::new(
+            chain_title.x,
+            chain_title.y,
+            chain_title.width,
+            chain.height.min(2),
+        )),
         Some(TutorialTarget::Generator(id)) => Some(Rect::new(
-            rows[4].x,
-            rows[4].y.saturating_add(id.index() as u16),
-            rows[4].width,
+            gen_rect.x,
+            gen_rect.y.saturating_add(id.index() as u16),
+            gen_rect.width,
             1,
         )),
-        Some(TutorialTarget::HelpKey) => Some(rows[8]),
-        _ => hits.tabs.iter().find_map(|(rect, tab)| {
-            (Some(*tab) == crate::render::coach::target_tab(ui)).then_some(*rect)
-        }),
+        Some(TutorialTarget::HelpKey) => Some(footer),
+        _ => hits
+            .tabs
+            .iter()
+            .find_map(|(rect, tab)| (Some(*tab) == coach::target_tab(ui)).then_some(*rect)),
     };
 }
 
-// ---------------------------------------------------------------------
-// Layouts
-// ---------------------------------------------------------------------
-
-fn render_narrow(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
-    let selection = if selection_line(ui).is_some() { 1 } else { 0 };
-    let rows = Layout::vertical([
-        Constraint::Length(3),         // resource band
-        Constraint::Length(1),         // rule
-        Constraint::Length(3),         // scope
-        Constraint::Length(1),         // capacitor
-        Constraint::Length(1),         // carrier
-        Constraint::Length(1),         // generator header
-        Constraint::Length(4),         // generators
-        Constraint::Length(1),         // objective
-        Constraint::Length(selection), // selection explainer
-        Constraint::Min(0),            // signal chain
-        Constraint::Length(1),         // rule
-        Constraint::Length(1),         // footer
-    ])
-    .areas::<12>(inner);
-
-    render_band(frame, rows[0], ui, g);
-    render_rule(frame, rows[1], &ui.palette, g);
-    render_scope(frame, rows[2], ui, g);
-    render_capacitor(frame, rows[3], ui, g);
-    render_carrier(frame, rows[4], ui);
-    render_generator_header(frame, rows[5], &ui.palette);
-    render_generators(frame, rows[6], ui, hits);
-    render_hint(frame, rows[7], ui, g);
-    render_selection(frame, rows[8], ui);
-    render_chain(frame, rows[9], ui, g, hits, false);
-    render_rule(frame, rows[10], &ui.palette, g);
-    render_footer(frame, rows[11], ui);
-}
-
-fn render_wide(frame: &mut Frame, inner: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
-    let selection = if selection_line(ui).is_some() { 1 } else { 0 };
-    let rows = Layout::vertical([
-        Constraint::Length(3),         // resource band
-        Constraint::Length(1),         // rule
-        Constraint::Min(0),            // body
-        Constraint::Length(selection), // selection explainer
-        Constraint::Length(1),         // objective
-        Constraint::Length(1),         // rule
-        Constraint::Length(1),         // footer
-    ])
-    .areas::<7>(inner);
-
-    render_band(frame, rows[0], ui, g);
-    render_rule(frame, rows[1], &ui.palette, g);
-
-    let cols = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(1),
-        Constraint::Fill(1),
-    ])
-    .areas::<3>(rows[2]);
-    let (left, mid, right) = (cols[0], cols[1], cols[2]);
-
-    let divider: Vec<Line> = (0..mid.height)
-        .map(|_| Line::from(Span::styled(g.v_line.to_string(), dim(ui.palette))))
-        .collect();
-    frame.render_widget(Paragraph::new(Text::from(divider)), mid);
-
-    let left_rows = Layout::vertical([
-        Constraint::Min(0),    // scope
-        Constraint::Length(1), // capacitor
-        Constraint::Length(1), // carrier
-        Constraint::Length(1), // generator header
-        Constraint::Length(1), // generator caption
-        Constraint::Length(4), // generators
-    ])
-    .areas::<6>(left);
-    render_scope(frame, left_rows[0], ui, g);
-    render_capacitor(frame, left_rows[1], ui, g);
-    render_carrier(frame, left_rows[2], ui);
-    render_generator_header(frame, left_rows[3], &ui.palette);
-    render_caption(
-        frame,
-        left_rows[4],
-        "   Costs rise with each unit.",
-        &ui.palette,
+fn render_ticker(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
+    let text = ui.toasts.last().map(String::as_str).unwrap_or("LISTENING");
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text.to_owned(), dim(p)))),
+        area,
     );
-    render_generators(frame, left_rows[5], ui, hits);
-
-    let right_rows =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(11)]).areas::<2>(right);
-    render_chain(frame, right_rows[0], ui, g, hits, true);
-    render_station(frame, right_rows[1], ui);
-
-    render_selection(frame, rows[3], ui);
-    render_hint(frame, rows[4], ui, g);
-    render_rule(frame, rows[5], &ui.palette, g);
-    render_footer(frame, rows[6], ui);
 }
 
 fn render_demo_banner(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
@@ -271,9 +491,9 @@ fn render_demo_banner(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
         )
     };
     let second = if compact {
-        "automation is on; keys additive   ? manual   1-4 screens"
+        " automation is on; keys additive   ? manual   1-4 screens"
     } else {
-        "the station plays itself; keys are additive   ? manual   1-4 screens"
+        " the station plays itself; keys are additive   ? manual   1-4 screens"
     };
     let prefix = "DEMO // NOTHING IS SAVED";
     let rest = first.strip_prefix(prefix).unwrap_or("");
@@ -291,329 +511,6 @@ fn render_demo_banner(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(second, dim(p)))).style(Style::new().bg(p.panel)),
         rows[1],
-    );
-}
-
-fn render_caption(frame: &mut Frame, area: Rect, text: &str, p: &Palette) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text.to_owned(), dim(*p)))),
-        area,
-    );
-}
-
-// ---------------------------------------------------------------------
-// Resource band
-// ---------------------------------------------------------------------
-
-fn render_band(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
-    let p = ui.palette;
-    if !ui.ascii && area.width >= 70 {
-        let value = amount(ui.anim.echo_display);
-        let (numeric, suffix) = split_numeric(&value);
-        let digits_width = (numeric.chars().count() * 4).saturating_sub(1) as u16;
-        let left_width = (digits_width + suffix.chars().count() as u16 + 3 + 5)
-            .max(23)
-            .min(area.width.saturating_sub(24));
-        let cols = Layout::horizontal([Constraint::Length(left_width), Constraint::Fill(1)])
-            .areas::<2>(area);
-        render_block_echo(frame, cols[0], ui, numeric, suffix);
-        render_band_right(frame, cols[1], ui, g);
-    } else {
-        let rows = Layout::vertical([Constraint::Length(1); 3]).areas::<3>(area);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("ECHO ", dim(p)),
-                Span::styled(amount(ui.anim.echo_display), bold_accent(p)),
-                Span::styled(format!("  +{}/s", rate_text(ui.view.rate())), accent(p)),
-            ])),
-            rows[0],
-        );
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    if coach::target_is(ui, TutorialTarget::PeakReadout) {
-                        format!("{} PEAK ", coach::marker(ui.ascii))
-                    } else {
-                        "PEAK ".to_owned()
-                    },
-                    if coach::target_is(ui, TutorialTarget::PeakReadout) {
-                        bold_amber(p)
-                    } else {
-                        dim(p)
-                    },
-                ),
-                Span::styled(amount(ui.view.peak()), text(p)),
-                Span::styled("   FATHOM ", dim(p)),
-                Span::styled(count(ui.view.fathoms()), amber(p)),
-            ])),
-            rows[1],
-        );
-        render_next_row(frame, rows[2], ui, g);
-    }
-}
-
-fn split_numeric(value: &str) -> (&str, &str) {
-    let end = value
-        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .unwrap_or(value.len());
-    (&value[..end], &value[end..])
-}
-
-fn digit_glyph(c: char) -> [&'static str; 2] {
-    const DIGITS: [[&str; 2]; 10] = [
-        ["█▀█", "█▄█"],
-        [" █ ", " █ "],
-        ["▀▀█", "█▄▄"],
-        ["▀▀█", "▄▄█"],
-        ["█ █", "▀▀█"],
-        ["█▀▀", "▄▄█"],
-        ["█▀▀", "█▄█"],
-        ["▀▀█", "  █"],
-        ["█▀█", "█▄█"],
-        ["█▀█", "▀▀█"],
-    ];
-    match c {
-        '0'..='9' => DIGITS[(c as u8 - b'0') as usize],
-        '.' => ["   ", " ▄ "],
-        _ => ["   ", "   "],
-    }
-}
-
-fn render_block_echo(frame: &mut Frame, area: Rect, ui: &UiState<'_>, numeric: &str, suffix: &str) {
-    let p = ui.palette;
-    let style = bold_accent(p);
-    let rows = Layout::vertical([Constraint::Length(1); 3]).areas::<3>(area);
-
-    let mut top = String::new();
-    let mut bottom = String::new();
-    for (i, c) in numeric.chars().enumerate() {
-        if i > 0 {
-            top.push(' ');
-            bottom.push(' ');
-        }
-        let glyph = digit_glyph(c);
-        top.push_str(glyph[0]);
-        bottom.push_str(glyph[1]);
-    }
-    let top_line = Line::from(vec![
-        Span::styled("ECHO ", dim(p)),
-        Span::styled(top, style),
-        Span::styled(
-            if suffix.is_empty() {
-                String::new()
-            } else {
-                format!(" {suffix}")
-            },
-            style,
-        ),
-    ]);
-    frame.render_widget(Paragraph::new(top_line), rows[0]);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("     ", dim(p)),
-            Span::styled(bottom, style),
-        ])),
-        rows[1],
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("RATE ", dim(p)),
-            Span::styled(format!("+{}/s", rate_text(ui.view.rate())), accent(p)),
-        ])),
-        rows[2],
-    );
-}
-
-fn render_band_right(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
-    let p = ui.palette;
-    let rows = Layout::vertical([Constraint::Length(1); 3]).areas::<3>(area);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                if coach::target_is(ui, TutorialTarget::PeakReadout) {
-                    format!("{} PEAK ", coach::marker(ui.ascii))
-                } else {
-                    "PEAK   ".to_owned()
-                },
-                if coach::target_is(ui, TutorialTarget::PeakReadout) {
-                    bold_amber(p)
-                } else {
-                    dim(p)
-                },
-            ),
-            Span::styled(amount(ui.view.peak()), text(p)),
-        ])),
-        rows[0],
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("FATHOM ", dim(p)),
-            Span::styled(count(ui.view.fathoms()), amber(p)),
-        ])),
-        rows[1],
-    );
-    render_next_row(frame, rows[2], ui, g);
-}
-
-fn render_next_row(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
-    let p = ui.palette;
-    let progress = model::descent_progress(ui.view);
-    let pct = (progress.fraction * 100.0).round() as u32;
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("NEXT   ", dim(p)),
-            Span::styled(amount(progress.next), text(p)),
-            Span::styled("  ", dim(p)),
-            Span::styled(bar(progress.fraction, 10, g), accent(p)),
-            Span::styled(format!(" {pct:>3}%"), dim(p)),
-        ])),
-        area,
-    );
-}
-
-// ---------------------------------------------------------------------
-// Scope
-// ---------------------------------------------------------------------
-
-/// Fixed deterministic contacts as `(angle_radians, radius_fraction)`.
-const CONTACTS: [(f64, f64); 4] = [(0.45, 0.62), (2.25, 0.82), (4.05, 0.48), (5.35, 0.88)];
-
-fn render_scope(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    let p = ui.palette;
-
-    if area.height <= 3 {
-        let rows = Layout::vertical([Constraint::Length(1); 3]).areas::<3>(area);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled("SONAR", dim(p)))),
-            rows[0],
-        );
-        let mut spans = Vec::new();
-        let sequence = [
-            g.dot,
-            g.scope_ring,
-            g.scope_dot,
-            g.scope_cross,
-            g.scope_ring,
-            g.scope_dot,
-            g.dot,
-        ];
-        for (i, glyph) in sequence.iter().enumerate() {
-            let style = if i == 3 {
-                bold_amber(p)
-            } else if i % 2 == 0 {
-                dim(p)
-            } else {
-                accent(p)
-            };
-            spans.push(Span::styled(format!("{glyph} "), style));
-        }
-        if ui.anim.pulse_phase.is_some() {
-            spans.push(Span::styled(" SWEEP", bold_amber(p)));
-        }
-        frame.render_widget(
-            Paragraph::new(Line::from(spans)).alignment(ratatui::layout::Alignment::Center),
-            rows[1],
-        );
-        return;
-    }
-
-    let w = area.width as usize;
-    let h = area.height as usize;
-    let cx = (w as f64 - 1.0) / 2.0;
-    let cy = (h as f64 - 1.0) / 2.0;
-    let max_r = (w as f64 / 2.0).min(h as f64).max(1.0) - 1.0;
-
-    // class: 0 blank, 1 dim, 2 accent
-    let mut cells = vec![vec![(' ', 0u8); w]; h];
-
-    for (y, row) in cells.iter_mut().enumerate() {
-        for (x, cell) in row.iter_mut().enumerate() {
-            let dx = x as f64 - cx;
-            let dy = (y as f64 - cy) * 1.9;
-            let distance = (dx * dx + dy * dy).sqrt();
-            let mut glyph = ' ';
-            let mut class = 0u8;
-
-            if distance <= max_r {
-                if (x as i32) == cx.round() as i32 {
-                    glyph = g.dot;
-                    class = 1;
-                }
-                if (y as i32) == cy.round() as i32 {
-                    glyph = g.dash;
-                    class = 1;
-                }
-            }
-            for ring in 1..=3 {
-                let radius = max_r * ring as f64 / 3.0;
-                if (distance - radius).abs() < 0.6 {
-                    glyph = g.scope_ring;
-                    class = 1;
-                }
-            }
-            if distance < 0.8 {
-                glyph = g.scope_cross;
-                class = 2;
-            }
-            *cell = (glyph, class);
-        }
-    }
-
-    for (angle, fraction) in CONTACTS {
-        let x = cx + angle.cos() * max_r * fraction;
-        let y = cy + angle.sin() * max_r * fraction / 1.9;
-        let xi = x.round() as i32;
-        let yi = y.round() as i32;
-        if xi >= 0 && yi >= 0 && (xi as usize) < w && (yi as usize) < h {
-            cells[yi as usize][xi as usize] = (g.scope_dot, 2);
-        }
-    }
-
-    if let Some(phase) = ui.anim.pulse_phase {
-        let radius = max_r * phase.clamp(0.0, 1.0);
-        for (y, row) in cells.iter_mut().enumerate() {
-            for (x, cell) in row.iter_mut().enumerate() {
-                let dx = x as f64 - cx;
-                let dy = (y as f64 - cy) * 1.9;
-                let distance = (dx * dx + dy * dy).sqrt();
-                if distance <= max_r && (distance - radius).abs() < 0.7 {
-                    *cell = (g.scope_cross, 2);
-                }
-            }
-        }
-    }
-
-    let mut lines: Vec<Line> = Vec::with_capacity(h);
-    for row in cells {
-        let mut spans: Vec<Span> = Vec::new();
-        let mut run = String::new();
-        let mut run_class = row[0].1;
-        for (glyph, class) in row {
-            if class != run_class {
-                if !run.is_empty() {
-                    let style = if run_class == 2 { accent(p) } else { dim(p) };
-                    spans.push(Span::styled(std::mem::take(&mut run), style));
-                }
-                run_class = class;
-            }
-            run.push(glyph);
-        }
-        if !run.is_empty() {
-            let style = if run_class == 2 { accent(p) } else { dim(p) };
-            spans.push(Span::styled(run, style));
-        }
-        lines.push(Line::from(spans));
-    }
-    frame.render_widget(Paragraph::new(Text::from(lines)), area);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled("SONAR", dim(p)))),
-        Rect::new(area.x, area.y, area.width.min(5), 1),
     );
 }
 
@@ -659,48 +556,6 @@ fn render_capacitor(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs)
     } else {
         spans.push(Span::styled(format!("  CHARGING {remaining}s"), amber(p)));
     }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn render_carrier(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
-    let p = ui.palette;
-    let carrier = ui.view.carrier_band();
-    let tuned = ui.view.tuned_band();
-    let matched = ui.view.carrier_matched();
-    let flash = ui.anim.carrier_flash;
-
-    let tune_target = coach::target_is(ui, TutorialTarget::TuneStrip);
-    let tune_label = if tune_target {
-        format!("{} TUNE  ", coach::marker(ui.ascii))
-    } else {
-        "TUNE    ".to_owned()
-    };
-    let mut spans = vec![Span::styled(
-        tune_label,
-        if tune_target { bold_amber(p) } else { dim(p) },
-    )];
-    for band in 0..6u8 {
-        let number = band + 1;
-        let label = if band == tuned {
-            format!("[{number}*]")
-        } else {
-            format!("[{number}]")
-        };
-        let style = if flash {
-            bold_amber(p)
-        } else if band == tuned {
-            if matched { bold_amber(p) } else { text(p) }
-        } else if band == carrier {
-            bold_accent(p)
-        } else {
-            dim(p)
-        };
-        spans.push(Span::styled(label, style));
-    }
-    spans.push(Span::styled(
-        if matched { "  TUNED" } else { "  TUNING" },
-        if matched { bold_amber(p) } else { dim(p) },
-    ));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -809,14 +664,7 @@ fn render_generator(
 // Signal Chain
 // ---------------------------------------------------------------------
 
-fn render_chain(
-    frame: &mut Frame,
-    area: Rect,
-    ui: &UiState<'_>,
-    g: &Glyphs,
-    hits: &mut HitMap,
-    explainer: bool,
-) {
+fn render_chain(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs, hits: &mut HitMap) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -842,17 +690,8 @@ fn render_chain(
         ])),
         Rect::new(area.x, area.y, area.width, 1),
     );
-    let header = if explainer { 2 } else { 1 };
-    if explainer && area.height >= 2 {
-        render_caption(
-            frame,
-            Rect::new(area.x, area.y + 1, area.width, 1),
-            "   One-time this run; Descent resets them.",
-            &p,
-        );
-    }
 
-    let visible = area.height.saturating_sub(header) as usize;
+    let visible = area.height.saturating_sub(1) as usize;
     if visible == 0 {
         return;
     }
@@ -862,7 +701,7 @@ fn render_chain(
     };
     let start = window_start(UpgradeId::ALL.len(), visible, focus);
     for (offset, index) in (start..UpgradeId::ALL.len()).take(visible).enumerate() {
-        let rect = Rect::new(area.x, area.y + header + offset as u16, area.width, 1);
+        let rect = Rect::new(area.x, area.y + 1 + offset as u16, area.width, 1);
         hits.upgrades.push((rect, index));
         render_upgrade_row(frame, rect, index, ui);
     }
@@ -938,45 +777,8 @@ fn render_upgrade_row(frame: &mut Frame, area: Rect, index: usize, ui: &UiState<
 }
 
 // ---------------------------------------------------------------------
-// Station, hint, footer
+// Hint and footer
 // ---------------------------------------------------------------------
-
-fn render_station(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
-    let p = ui.palette;
-    let view = ui.view;
-    let tuned = if view.carrier_matched() {
-        "TUNED"
-    } else {
-        "MISMATCH"
-    };
-    let charge_fraction = view.pulse_charge_fraction();
-    let pulse_state = if view.can_pulse() {
-        "READY".to_owned()
-    } else {
-        format!("CHARGING {}%", (charge_fraction * 100.0).round() as u32)
-    };
-    let lines = vec![
-        Line::from(Span::styled("STATION", bold_amber(p))),
-        kv("DEPTH", format!("{} m", count(view.depth_m())), p),
-        kv("CARRIER", format!("{:02}", view.carrier_band() + 1), p),
-        kv("TUNED", format!("{:02}  {tuned}", view.tuned_band() + 1), p),
-        kv("RATE", format!("{}/s", rate_text(view.rate())), p),
-        kv("PEAK", amount(view.peak()), p),
-        kv("BEST PEAK", amount(view.best_peak()), p),
-        kv("OFFLINE CAP", format!("{} h", view.offline_cap_hours()), p),
-        kv("DESCENTS", count(view.descents()), p),
-        kv("ACHIEVEMENTS", count(view.achievement_count() as u32), p),
-        kv("PULSE", pulse_state, p),
-    ];
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn kv(label: &str, value: String, p: P) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label:<13}"), dim(p)),
-        Span::styled(value, text(p)),
-    ])
-}
 
 fn render_hint(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
     if ui.coach_active() {
@@ -1005,29 +807,17 @@ fn render_footer(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
     );
 }
 
-/// Expose the state used by the resource band for unit tests.
-#[cfg(test)]
-pub(crate) fn numeric_split(value: &str) -> (&str, &str) {
-    split_numeric(value)
+/// Split a numeric string into the numeric part and suffix (e.g. "1,234M" → ("1,234", "M")).
+pub(crate) fn split_numeric(value: &str) -> (&str, &str) {
+    let end = value
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(value.len());
+    (&value[..end], &value[end..])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn numeric_split_extracts_suffix() {
-        assert_eq!(numeric_split("0"), ("0", ""));
-        assert_eq!(numeric_split("12.0B"), ("12.0", "B"));
-        assert_eq!(numeric_split("1.00e36"), ("1.00", "e36"));
-        assert_eq!(numeric_split("999"), ("999", ""));
-    }
-
-    #[test]
-    fn block_digits_support_period() {
-        assert_eq!(digit_glyph('.'), ["   ", " ▄ "]);
-        assert_eq!(digit_glyph('0'), ["█▀█", "█▄█"]);
-    }
 
     #[test]
     fn contributions_sum_below_total_rate() {

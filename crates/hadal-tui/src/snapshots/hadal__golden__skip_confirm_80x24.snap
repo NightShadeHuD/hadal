@@ -4,12 +4,12 @@ expression: "draw(80, 24, &ui)"
 ---
 ┌ HADAL ── RELAY K-9 ───────────────────────────── DEPTH 7,912 m ── CARRIER 01 ┐
 │[1 SONAR]  2 DESCENT   3 ARCHIVE   4 SYSTEM                                   │
-│ECHO █▀█               PEAK   0                                               │
-│     █▄█               FATHOM 0                                               │
-│RATE +0.15/s           NEXT   1.00M  ░░░░░░░░░░   0%                          │
-├──────────────────────────────────────────────────────────────────────────────┤
-│SONAR                                                                         │
-│                                · ◦ • × ◦ • ·                                 │
+│               ▄▄▄▄▄              │ ECHO █▀█                                  │
+│            ▄▀▀  █  ▀▀▄           │      █ █                                  │
+│          ▄▀▀▄▄▀▀█▀▀▀▀▀▀▄         │      ▀▀▀                                  │
+│         ▄▀ ▄▀▀███▄▄██▄ ▀▄        │ RATE +0.15/s                              │
+│         █▄▄█▄▄█▀█▀████▄▄▀        │ PULSE   ████████ 100%  READY              │
+│▲CARRIER 01  TUNED   ==---------- │ NEXT    1.00M  ░░░░░░░░░░   0%            │
 │       ┌ SKIP TUTORIAL? ──────────────────────────────────────────────┐       │
 │       │You can replay it from SYSTEM (4) before your first descent.  │       │
 │       │                                                              │       │
@@ -17,12 +17,12 @@ expression: "draw(80, 24, &ui)"
 │       │                                                              │       │
 │       │                                                              │       │
 │       └──────────────────────────────────────────────────────────────┘       │
-│  c/C Tidal Core     0   2.50M       +0.00/s LOCK  need 5 Sonar Masts         │
-│› SPACE  pulse the capacitor. A pulse pays 10 s of production.                │
 │SIGNAL CHAIN   u focus                                                        │
 │  Impedance Match       100 LOCK  need 1 Drifter · all production ×2          │
 │  Sweep Profile         750 LOCK  need 10 Hydrophones · Hydrophones ×3        │
 │  Cascaded Gain       8,000 LOCK  need 1 Sonar Mast · all production ×2       │
-├──────────────────────────────────────────────────────────────────────────────┤
+│  Stable Drift       40,000 LOCK  need 6 Drifters · Drifters ×3               │
+│› SPACE  pulse the capacitor. A pulse pays 10 s of production.                │
+│LISTENING                                                                     │
 │SPACE pulse  f tune  u chain  2 descent  ? manual  Ctrl+S save  q quit        │
 └──────────────────────────────────────────────────────────────────────────────┘

@@ -6,11 +6,7 @@ A terminal-native deep-sea signals incremental. You operate Relay K-9, a derelic
 
 ## Your first five minutes
 
-A short interactive tutorial leads you: `SPACE` pulse → `h` buy a Hydrophone → `h` again to
-10 Hydrophones → `d` a Drifter → `u` buy Impedance Match → `f` tune when the carrier drifts →
-reach `1.00M` Peak → `2`, `p`, `y` to descend → buy Auto-Pulse → a second Descent → open
-SYSTEM with `4` → `?` for the field manual. The coach waits for each action and points at the
-exact control.
+A graphical boot sequence introduces Relay K-9, then the spotlight coach walks you through: `SPACE` pulse → `h` buy a Hydrophone → `h` again to 10 Hydrophones → `d` a Drifter → `u` buy Impedance Match → `f` tune when the carrier drifts → reach `1.00M` Peak → `2`, `p`, `y` to descend → buy Auto-Pulse → a second Descent → open SYSTEM with `4` → `?` for the field manual. The coach waits for each action and points at the exact control.
 
 - **Echo** — this run's spendable currency; generators produce it continuously.
 - **Peak** — the highest Echo you have reached this run; Descent checks it.
@@ -126,10 +122,10 @@ Text-entry overlays consume all keys except `Esc` (cancel) and `Enter` (submit).
 
 ## Screens and overlays
 
-- **Boot/title** (first run): wordmark, station/depth readout, typewriter boot lines; any key skips.
+- **Boot/title** (first run): half-block wordmark + radar dome + carrier wave + staged story beats; any key skips.
 - **SONAR (1):** resource band (Echo/rate, Peak, Fathom, next Descent threshold), sonar scope, pulse capacitor, carrier strip, generator rows, Signal Chain list.
-- **DESCENT (2):** depth gauge, current/next Fathom gain, hull tree grouped by branch, Ballast Governor target, confirmation dialog.
-- **ARCHIVE (3):** scrollable logs, achievement grid with lock state, lifetime stats.
+- **DESCENT (2):** depth gauge, Fathom gain, hull tree with branch grouping, Ballast Governor target, graphical descent confirmation.
+- **ARCHIVE (3):** scrollable signal log, achievement grid with lock state, lifetime stats, signal map art.
 - **SYSTEM (4):** theme/reduce-motion/ASCII/mouse/color/bell settings, per-generator auto-buy toggles, an owned-hull automation summary (with the governor target), and save/export/import/reset via `s`/`e`/`i`/`R`. Settings apply live and persist to `config.json`.
 
 Overlays: help, offline summary, descent confirmation, import/export text input, reset confirmation, too-small terminal.
@@ -191,7 +187,7 @@ HADAL makes no network calls and collects no telemetry. All state lives in the l
 
 ## Verification status
 
-Windows verified locally (release build, all test suites, simulator pacing, and CLI smoke via `--version`, `--help`, `save path`). CI passes on Ubuntu, Windows and macOS — fmt, clippy, workspace tests, MSRV 1.89, release pacing, and `cargo-deny` (see the [Actions page](https://github.com/NightShadeHuD/hadal/actions)). Release archives are published on the Releases page.
+Windows verified locally (release build, all test suites, simulator pacing, and CLI smoke via `--version`, `--help`, `save path`). CI is configured for Ubuntu, Windows and macOS — fmt, clippy, workspace tests, MSRV 1.89, release pacing, and `cargo-deny` (see the [Actions page](https://github.com/NightShadeHuD/hadal/actions); the last CI run was green). Release archives are not claimed until a tag is cut.
 
 ## License
 

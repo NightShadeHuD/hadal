@@ -4,16 +4,20 @@ expression: "draw(140, 40, &ui)"
 ---
 ┌ HADAL ── DESCENT ────────────────────────────────────────────────────────────────────────────────────────── DEPTH 9,412 m ── DESCENTS 12 ┐
 │ 1 SONAR  [2 DESCENT]  3 ARCHIVE   4 SYSTEM                                                                                               │
-│DEPTH GAUGE           │RUN    peak 910M   rate 36.3M/s                                                                                    │
-│ │ 20,000             │  descents 12  best 840B  era F 120  life F 300                                                                    │
-│ │                    │DESCENT +16 FATHOMS   READY                                                                                        │
-│ │                    │NEXT    1.00B  ████████░░  83%                                                                                     │
-│ │                    │RESETS Echo · Peak Echo · Generators · Signal Chain upgrades · Pulse capacitor · Carrier tuning · Run tick counters│
-│ │                    │PERSISTS Fathoms · Era Fathoms · Lifetime Fathoms · Hulls · Achievements · Logs · Depth                            │
-│ │                    │                                                                                                                   │
-│ │                    │                                                                                                                   │
-│ ▼  9,412             │                                                                                                                   │
-│ │  7,912             │                                                                                                                   │
+│TRENCH                │RUN    peak 910M   rate 36.3M/s                                                                                    │
+│  ·│░░░░░░░░░░░░░░░░░░│  descents 12  best 840B  era F 120  life F 300                                                                    │
+│  ·│░░░░░░░░░░░░░░░░░░│DESCENT +16 FATHOMS   READY                                                                                        │
+│  ·├▁▁▄███▄▁▁▁▁▁▁▁▁▁▁▁│NEXT    1.00B  ████████░░  83%                                                                                     │
+│  ·◆▒▒█████▒▒▒▒▒▒▒▒▒▒▒│RESETS Echo · Peak Echo · Generators · Signal Chain upgrades · Pulse capacitor · Carrier tuning · Run tick counters│
+│   ◇▁▁▀███▀▁▁▁▁▁▁▁▁▁▁▁│PERSISTS Fathoms · Era Fathoms · Lifetime Fathoms · Hulls · Achievements · Logs · Depth                            │
+│   │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│                                                                                                                   │
+│   ├▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│                                                                                                                   │
+│   │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│                                                                                                                   │
+│    9,412 m  next 9912│                                                                                                                   │
+│HULL SCHEMATIC  15/17 owned                                                                                                               │
+│AUTOMATION  ██ ██ ██ ██ ██ ██ ██ ██                                                                                                       │
+│SIGNAL  ██ ██ ██ ░░   ENDURANCE  ██ ██ ██   DESCENT  ██ ░░                                                                                │
+│━━━━━━━━━━━━━━━━━━━━  K-9   █ owned  ░ empty                                                                                              │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │HULL TREE   15/17 owned   ↑↓ focus   Enter buy                                                                                            │
 │AUTOMATION                                                                                                                                │
@@ -32,10 +36,6 @@ expression: "draw(140, 40, &ui)"
 │  Deep Field         600F NEED   Global production ×3.                                                                                    │
 │ENDURANCE                                                                                                                                 │
 │  Long Storage        30F OWNED  Offline cap 24 h.                                                                                        │
-│  Extended Ballast   120F OWNED  Offline cap 72 h.                                                                                        │
-│  Abyssal Reservoir  350F OWNED  Offline cap 168 h.                                                                                       │
-│DESCENT                                                                                                                                   │
-│  Tidal Loop         200F OWNED  Fathom gain ×1.5.                                                                                        │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  Auto-Pulse: Fires a pulse whenever the capacitor is full; 1 Fathom (owned).                                                             │
 │BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000                                                                   │

@@ -8,7 +8,7 @@ use crossterm::event::{
     Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use hadal_core::content::ids::{GeneratorId, HullId, UpgradeId};
-use hadal_core::content::story::{BOOT_LINES, log_text};
+use hadal_core::content::story::log_text;
 use hadal_core::content::tables::achievement_def;
 use hadal_core::content::tutorial::{STEPS, TutorialStepId};
 use hadal_core::engine::TutorialUiEvent;
@@ -44,8 +44,16 @@ const FRAME: Duration = Duration::from_millis(33);
 const AUTOSAVE: Duration = Duration::from_secs(30);
 /// Gap above which the loop routes through offline catch-up.
 const GAP: Duration = Duration::from_secs(2);
-/// Boot line reveal interval.
-const BOOT_LINE_MS: u64 = 180;
+/// Boot stage reveal thresholds (ms): first beat, second beat, third beat.
+const BOOT_STAGE_MS: [u64; 3] = [800, 1400, 2000];
+/// Number of boot reveal stages.
+const BOOT_STAGES: usize = BOOT_STAGE_MS.len();
+/// Total boot duration before the console settles (ms).
+const BOOT_TOTAL_MS: u64 = 2500;
+/// Short boot for an existing save (ms).
+const BOOT_EXISTING_MS: u64 = 400;
+/// Short boot under reduce-motion (ms).
+const BOOT_REDUCE_MS: u64 = 800;
 /// Echo odometer tween duration.
 const TWEEN_MS: u64 = 250;
 /// Pulse scope-ring duration.
@@ -257,6 +265,10 @@ struct AnimState {
     pulse_started: Option<Instant>,
     carrier_flash_until: Option<Instant>,
     row_flash_until: [Option<Instant>; 4],
+    started: Instant,
+    samples: [Decimal; 64],
+    head: usize,
+    last_sample: Instant,
 }
 
 impl AnimState {
@@ -266,11 +278,25 @@ impl AnimState {
             pulse_started: None,
             carrier_flash_until: None,
             row_flash_until: [None; 4],
+            started: Instant::now(),
+            samples: [Decimal::ZERO; 64],
+            head: 0,
+            last_sample: Instant::now(),
         }
     }
 
     fn observe_echo(&mut self, target: Decimal, now: Instant) {
         self.echo.observe(target, now);
+    }
+
+    /// Sample the current rate into the history buffer (called once per second).
+    fn sample_rate(&mut self, rate: Decimal, now: Instant) {
+        let elapsed = now.duration_since(self.last_sample);
+        if elapsed >= Duration::from_secs(1) {
+            self.head = (self.head + 1) % 64;
+            self.samples[self.head] = rate;
+            self.last_sample = now;
+        }
     }
 
     fn snapshot(&self, now: Instant, reduce_motion: bool) -> Anim {
@@ -290,6 +316,10 @@ impl AnimState {
             row_flash: std::array::from_fn(|index| {
                 !reduce_motion && self.row_flash_until[index].is_some_and(|until| now < until)
             }),
+            frame_ms: now.duration_since(self.started).as_millis() as u64,
+            rate_history: self.samples,
+            rate_head: self.head,
+            reduce_motion,
         }
     }
 }
@@ -375,6 +405,8 @@ pub struct Session {
     last_save_unix: Option<u64>,
     last_hull_click: Option<(usize, Instant)>,
     bell_once: bool,
+    /// Tutorial nudge text to display in the coach status row.
+    tutorial_nudge: Option<(String, Instant)>,
     purchase_generators: u32,
     purchase_upgrades: u32,
     purchase_hulls: u32,
@@ -447,6 +479,7 @@ impl Session {
                 last_save_unix: None,
                 last_hull_click: None,
                 bell_once: false,
+                tutorial_nudge: None,
                 purchase_generators: 0,
                 purchase_upgrades: 0,
                 purchase_hulls: 0,
@@ -523,6 +556,7 @@ impl Session {
             last_save_unix: None,
             last_hull_click: None,
             bell_once: false,
+            tutorial_nudge: None,
             purchase_generators: 0,
             purchase_upgrades: 0,
             purchase_hulls: 0,
@@ -537,7 +571,7 @@ impl Session {
             session.offline_visible = elapsed >= 60;
             session.offline = Some(report);
             session.boot = Boot::Existing {
-                until: Instant::now() + Duration::from_millis(500),
+                until: Instant::now() + Duration::from_millis(BOOT_EXISTING_MS),
             };
             session.bell_once = session.offline_visible;
         } else {
@@ -573,7 +607,7 @@ impl Session {
                     revealed: self.reveal(now, started),
                 },
                 Boot::Existing { .. } => Screen::Boot {
-                    revealed: BOOT_LINES.len(),
+                    revealed: BOOT_STAGES,
                 },
                 Boot::Done => Screen::Sonar,
             };
@@ -588,10 +622,10 @@ impl Session {
 
     fn reveal(&self, now: Instant, started: Instant) -> usize {
         if self.reduce_motion {
-            return BOOT_LINES.len();
+            return BOOT_STAGES;
         }
         let ms = now.saturating_duration_since(started).as_millis() as u64;
-        ((ms / BOOT_LINE_MS) as usize).min(BOOT_LINES.len())
+        BOOT_STAGE_MS.iter().filter(|&&at| ms >= at).count()
     }
 
     /// Whether the boot sequence has completed.
@@ -601,9 +635,9 @@ impl Session {
             Boot::Existing { until } => now >= until,
             Boot::New { started } => {
                 let total = if self.reduce_motion {
-                    Duration::from_millis(600)
+                    Duration::from_millis(BOOT_REDUCE_MS)
                 } else {
-                    Duration::from_millis(BOOT_LINES.len() as u64 * BOOT_LINE_MS + 500)
+                    Duration::from_millis(BOOT_TOTAL_MS)
                 };
                 now.saturating_duration_since(started) >= total
             }
@@ -791,6 +825,55 @@ impl Session {
         !tutorial.completed && !tutorial.skipped && tutorial.step.id == TutorialStepId::Offline
     }
 
+    /// True when the tutorial is active and forbids `cmd`.
+    fn tutorial_blocks(&self, cmd: Command) -> bool {
+        if !self.tutorial_active() {
+            return false;
+        }
+        let tutorial = self.engine.tutorial();
+        !crate::input::tutorial_allows(tutorial.step.id, cmd)
+    }
+
+    /// Set the coach nudge for a wrong input on the current step.
+    fn nudge_wrong(&mut self, now: Instant) {
+        if !self.tutorial_active() {
+            return;
+        }
+        let key = match self.engine.tutorial().step.id {
+            TutorialStepId::Pulse => "SPACE",
+            TutorialStepId::FirstGenerator | TutorialStepId::SecondGenerator => "h",
+            TutorialStepId::Drifter => {
+                if self.engine.view().generator_owned(GeneratorId::Hydrophone) >= 10 {
+                    "d"
+                } else {
+                    "h"
+                }
+            }
+            TutorialStepId::Upgrade => {
+                if matches!(self.focus, Focus::Upgrade(_)) {
+                    "Enter"
+                } else {
+                    "u"
+                }
+            }
+            TutorialStepId::Tune => "f",
+            TutorialStepId::Peak => {
+                if self.engine.view().can_descend() {
+                    "2"
+                } else {
+                    "h"
+                }
+            }
+            TutorialStepId::Descend => "2",
+            TutorialStepId::Hull => "Enter",
+            TutorialStepId::SecondDescent => "2",
+            TutorialStepId::System => "4",
+            TutorialStepId::Manual => "?",
+            TutorialStepId::Offline => "Enter",
+        };
+        self.tutorial_nudge = Some((format!("PRESS {key}"), now + Duration::from_millis(500)));
+    }
+
     fn record_tutorial_ui(&mut self, event: TutorialUiEvent) {
         if self.tutorial_active() {
             self.engine.tutorial_ui(event);
@@ -866,6 +949,8 @@ impl Session {
         self.tutorial_finished = false;
         self.confirm_tutorial_replay = false;
         self.confirm_tutorial_skip = false;
+        self.current = ScreenKind::Sonar;
+        self.focus = Focus::None;
         self.save_now(now_unix);
     }
 
@@ -1729,9 +1814,14 @@ impl App {
                     self.session.tutorial_acknowledge(now_unix());
                     self.dirty = true;
                 } else if let Some(command) = map_key(key, Mode::Normal) {
-                    let logical_ms = self.session.started_at.elapsed().as_millis() as u64;
-                    if self.queue.push(command, logical_ms) {
+                    if self.session.tutorial_blocks(command) {
+                        self.session.nudge_wrong(now);
                         self.dirty = true;
+                    } else {
+                        let logical_ms = self.session.started_at.elapsed().as_millis() as u64;
+                        if self.queue.push(command, logical_ms) {
+                            self.dirty = true;
+                        }
                     }
                 }
             }
@@ -1766,9 +1856,14 @@ impl App {
                         mouse.modifiers.contains(KeyModifiers::SHIFT),
                     )
                 {
-                    let logical_ms = self.session.started_at.elapsed().as_millis() as u64;
-                    if self.queue.push(command, logical_ms) {
+                    if self.session.tutorial_blocks(command) {
+                        self.session.nudge_wrong(now);
                         self.dirty = true;
+                    } else {
+                        let logical_ms = self.session.started_at.elapsed().as_millis() as u64;
+                        if self.queue.push(command, logical_ms) {
+                            self.dirty = true;
+                        }
                     }
                 }
             }
@@ -1853,6 +1948,9 @@ impl App {
 
             let echo_now = self.session.engine.view().echo();
             self.session.anim.observe_echo(echo_now, now);
+            self.session
+                .anim
+                .sample_rate(self.session.engine.view().rate(), now);
 
             if now.saturating_duration_since(self.last_autosave) >= AUTOSAVE {
                 self.session.save_now(now_unix());
@@ -1869,6 +1967,14 @@ impl App {
         }
 
         self.session.expire_toasts(now);
+
+        // Expire stale nudge and force a redraw so the coach status row updates.
+        if let Some((_, until)) = self.session.tutorial_nudge
+            && now >= until
+        {
+            self.session.tutorial_nudge = None;
+            self.dirty = true;
+        }
     }
 
     /// Draw one frame and refresh the click map.
@@ -1924,6 +2030,11 @@ impl App {
                 tutorial: Some(self.session.engine.tutorial()),
                 confirm_skip: self.session.confirm_tutorial_skip,
                 confirm_replay: self.session.confirm_tutorial_replay,
+                tutorial_nudge: self
+                    .session
+                    .tutorial_nudge
+                    .as_ref()
+                    .and_then(|(text, until)| (now < *until).then_some(text.as_str())),
             };
             terminal.draw(|frame| {
                 hits = render(frame, &ui);
@@ -2006,6 +2117,7 @@ mod tests {
     use super::*;
     use clap::Parser;
     use crossterm::event::KeyEvent;
+    use crossterm::event::MouseButton;
     use hadal_core::GameState;
     use hadal_core::content::ids::{AchievementId, LogId};
     use hadal_core::save::SavePaths;
@@ -2079,6 +2191,7 @@ mod tests {
             last_save_unix: None,
             last_hull_click: None,
             bell_once: false,
+            tutorial_nudge: None,
             purchase_generators: 0,
             purchase_upgrades: 0,
             purchase_hulls: 0,
@@ -2837,6 +2950,12 @@ mod tests {
         assert!(h.view().hull_owned(HullId::AutoPulse));
         eprintln!("step 7 hull: auto-pulse owned");
 
+        // Leave the tutorial before free-play screen exploration; the gate
+        // blocks cross-tab navigation mid-step.
+        h.key(KeyCode::Char('S'));
+        h.key(KeyCode::Char('y'));
+        assert!(h.app.session.engine.tutorial().skipped);
+
         // Render ARCHIVE and SYSTEM.
         h.key(KeyCode::Char('3'));
         h.render();
@@ -3083,6 +3202,8 @@ mod tests {
         assert_eq!(app.session.engine.view().pulses_manual(), 1);
     }
 
+    /// Measured ~18 ms (debug). Release budget (AGENTS.md §12): 150 ms.
+    /// Bound: 250 ms debug (15× measured), 150 ms release (matches §12 budget).
     #[test]
     fn demo_startup_first_frame_measurement() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3095,7 +3216,16 @@ mod tests {
         app.render(&mut terminal, Instant::now()).expect("render");
         let elapsed = start.elapsed();
         eprintln!("measure: demo startup to first frame = {elapsed:?}");
-        assert!(elapsed < Duration::from_secs(2), "startup {elapsed:?}");
+        #[cfg(debug_assertions)]
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "startup {elapsed:?} (debug)"
+        );
+        #[cfg(not(debug_assertions))]
+        assert!(
+            elapsed < Duration::from_millis(150),
+            "startup {elapsed:?} (release)"
+        );
     }
 
     #[test]
@@ -3345,20 +3475,20 @@ mod tests {
     fn tutorial_active_system_replay_is_immediate() {
         let dir = tempfile::tempdir().expect("tempdir");
         let opts = options(dir.path());
-        let start = Instant::now();
-        let session = Session::start(&opts, now_unix()).expect("new save");
-        let mut h = Harness::new(App::new_at(session, start), start);
-        h.key(KeyCode::Char('x'));
-        h.key(KeyCode::Char(' '));
-        h.key(KeyCode::Char('h'));
-        assert_eq!(h.app.session.engine.tutorial().index, 2);
-        h.key(KeyCode::Char('4'));
-        for _ in 0..10 {
-            h.key(KeyCode::Down);
-        }
-        h.key(KeyCode::Enter);
-        assert!(!h.app.session.confirm_tutorial_replay);
-        assert_eq!(h.app.session.engine.tutorial().index, 0);
+        let engine = tutorial_engine(6, 0);
+        let mut store = SaveStore::new(dir.path());
+        store.save(engine.state(), now_unix()).expect("seed");
+        drop(store);
+
+        let mut session = Session::start(&opts, now_unix()).expect("load");
+        assert_eq!(session.engine.tutorial().index, 6);
+        assert!(session.tutorial_active());
+        // The input gate keeps the tutorial active on early steps, so the
+        // SYSTEM replay row is not reachable by keyboard mid-tutorial; exercise
+        // the immediate-replay branch directly.
+        session.tutorial_system_action(now_unix());
+        assert!(!session.confirm_tutorial_replay);
+        assert_eq!(session.engine.tutorial().index, 0);
     }
 
     #[test]
@@ -3449,6 +3579,130 @@ mod tests {
         h.key(KeyCode::Char('1'));
         h.render();
         assert!(!h.text().contains("TUTORIAL 13/13"));
+    }
+
+    #[test]
+    fn blocked_key_sets_nudge_and_does_not_act() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let opts = options(dir.path());
+        let start = Instant::now();
+        let session = Session::start(&opts, 1_000).expect("fresh session");
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x')); // skip boot
+        assert_eq!(h.app.session.engine.tutorial().index, 0);
+
+        // 'h' (buy Hydrophone) is not the step-0 action: no buy, step stable.
+        h.key(KeyCode::Char('h'));
+        assert_eq!(
+            h.view().generator_owned(GeneratorId::Hydrophone),
+            0,
+            "blocked key must not buy"
+        );
+        assert_eq!(h.app.session.engine.tutorial().index, 0);
+        let (text, _until) = h.app.session.tutorial_nudge.clone().expect("nudge set");
+        assert_eq!(text, "PRESS SPACE", "nudge names the expected key");
+    }
+
+    #[test]
+    fn blocked_mouse_click_sets_nudge() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut opts = options(dir.path());
+        opts.mouse = true;
+        let start = Instant::now();
+        let session = Session::start(&opts, 1_000).expect("fresh session");
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.key(KeyCode::Char('x'));
+        h.render();
+        let rect = h
+            .app
+            .session
+            .hit_map
+            .generators
+            .first()
+            .expect("generator hit region")
+            .0;
+        let event = CrosstermEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: rect.x + 1,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        h.app.handle_event(event, h.now);
+        h.app.tick(h.now);
+        assert_eq!(
+            h.view().generator_owned(GeneratorId::Hydrophone),
+            0,
+            "blocked click must not buy"
+        );
+        let (text, _until) = h.app.session.tutorial_nudge.clone().expect("nudge set");
+        assert_eq!(text, "PRESS SPACE");
+    }
+
+    #[test]
+    fn blocked_screen_key_does_not_switch_screens() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let start = Instant::now();
+        let session = headless(tutorial_engine(4, 0), dir.path().to_path_buf(), None);
+        let mut h = Harness::new(App::new_at(session, start), start);
+        assert_eq!(h.app.session.engine.tutorial().index, 4);
+        assert_eq!(h.app.session.screen(h.now), Screen::Sonar);
+
+        // '4' (OpenSystem) is not allowed on the Upgrade step.
+        h.key(KeyCode::Char('4'));
+        assert_eq!(
+            h.app.session.screen(h.now),
+            Screen::Sonar,
+            "blocked screen key must not switch"
+        );
+        assert_eq!(h.app.session.engine.tutorial().index, 4);
+        let (text, _until) = h.app.session.tutorial_nudge.clone().expect("nudge set");
+        assert_eq!(text, "PRESS u", "step 4 expects u (Enter when focused)");
+    }
+
+    #[test]
+    fn boot_is_animated_and_skippable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let start = Instant::now();
+        let mut session = Session::start(&options(dir.path()), 1_000).expect("fresh session");
+        session.reduce_motion = false;
+        session.boot = Boot::New { started: start };
+
+        // Stage thresholds: 800 / 1400 / 2000 ms.
+        assert_eq!(session.screen(start), Screen::Boot { revealed: 0 });
+        assert_eq!(
+            session.screen(start + Duration::from_millis(900)),
+            Screen::Boot { revealed: 1 }
+        );
+        assert_eq!(
+            session.screen(start + Duration::from_millis(1500)),
+            Screen::Boot { revealed: 2 }
+        );
+        assert_eq!(
+            session.screen(start + Duration::from_millis(2100)),
+            Screen::Boot { revealed: 3 }
+        );
+        assert!(!session.boot_done(start + Duration::from_millis(2499)));
+        assert!(session.boot_done(start + Duration::from_millis(2500)));
+
+        // Reduce motion finishes at 800 ms with all beats revealed.
+        session.reduce_motion = true;
+        session.boot = Boot::New { started: start };
+        assert_eq!(session.screen(start), Screen::Boot { revealed: 3 });
+        assert!(!session.boot_done(start + Duration::from_millis(799)));
+        assert!(session.boot_done(start + Duration::from_millis(800)));
+
+        // Any key at 100 ms skips straight to SONAR with the coach alive.
+        let mut h = Harness::new(App::new_at(session, start), start);
+        h.now = start + Duration::from_millis(100);
+        h.key(KeyCode::Char('x'));
+        assert!(h.app.session.boot_done(h.now));
+        assert_eq!(h.app.session.screen(h.now), Screen::Sonar);
+        let tutorial = h.app.session.engine.tutorial();
+        assert_eq!(tutorial.index, 0);
+        assert!(
+            !tutorial.completed && !tutorial.skipped,
+            "coach is active on SONAR"
+        );
     }
 
     #[test]
@@ -3612,6 +3866,9 @@ mod tests {
         let session = Session::start(&opts, 1_000).expect("fresh");
         let mut first = Harness::new(App::new_at(session, start), start);
         first.key(KeyCode::Char('x'));
+        // SYSTEM navigation is gated during the tutorial; leave it first.
+        first.key(KeyCode::Char('S'));
+        first.key(KeyCode::Char('y'));
         first.key(KeyCode::Char('4'));
         for _ in 0..7 {
             first.key(KeyCode::Down);
@@ -3675,6 +3932,9 @@ mod tests {
         let session = Session::start(&opts, now_unix()).expect("start");
         let mut h = Harness::new(App::new_at(session, start), start);
         h.key(KeyCode::Char('x'));
+        // SYSTEM navigation is gated during the tutorial; leave it first.
+        h.key(KeyCode::Char('S'));
+        h.key(KeyCode::Char('y'));
         h.key(KeyCode::Char('4'));
         for _ in 0..4 {
             h.key(KeyCode::Down);
@@ -3744,5 +4004,77 @@ mod tests {
         assert_eq!(overridden.color_depth, ColorDepth::TrueColor);
         let raw = fs::read_to_string(&config_path).expect("config json");
         assert!(raw.contains("\"none\""), "override must not persist: {raw}");
+    }
+
+    #[test]
+    fn replay_tutorial_restores_sonar_and_clears_focus() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let start = Instant::now();
+        let session = headless(tutorial_engine(4, 0), dir.path().to_path_buf(), None);
+        let mut h = Harness::new(App::new_at(session, start), start);
+        assert_eq!(h.app.session.engine.tutorial().index, 4);
+
+        // Put the player on SYSTEM with a focused row before replaying.
+        h.app.session.current = ScreenKind::System;
+        h.app.session.focus = Focus::System(10);
+
+        h.app.session.replay_tutorial(now_unix());
+        h.app.dirty = true;
+
+        assert_eq!(
+            h.app.session.current,
+            ScreenKind::Sonar,
+            "replay must switch to SONAR"
+        );
+        assert_eq!(h.app.session.focus, Focus::None, "replay must clear focus");
+        assert_eq!(
+            h.app.session.engine.tutorial().index,
+            0,
+            "replay resets tutorial to step 0"
+        );
+    }
+
+    #[test]
+    fn replay_then_navigate_sonar_not_softlocked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let start = Instant::now();
+        let session = headless(tutorial_engine(4, 0), dir.path().to_path_buf(), None);
+        let mut h = Harness::new(App::new_at(session, start), start);
+
+        h.app.session.replay_tutorial(now_unix());
+        h.app.dirty = true;
+        assert_eq!(h.app.session.current, ScreenKind::Sonar);
+        assert_eq!(h.app.session.engine.tutorial().index, 0);
+
+        // Key '1' (OpenSonar) is now allowed on step 0 (Pulse) after the fix.
+        h.key(KeyCode::Char('1'));
+        h.app.tick(h.now);
+        assert_eq!(
+            h.app.session.current,
+            ScreenKind::Sonar,
+            "must stay on SONAR"
+        );
+        assert_eq!(h.app.session.engine.tutorial().index, 0, "step unchanged");
+
+        // Tab click (OpenSonar via hit map) must also work.
+        h.render();
+        let rect = h
+            .app
+            .session
+            .hit_map
+            .tabs
+            .iter()
+            .find(|(_, tab)| *tab == Tab::Sonar)
+            .expect("sonar tab")
+            .0;
+        let event = CrosstermEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + 1,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        h.app.handle_event(event, h.now);
+        h.app.tick(h.now);
+        assert_eq!(h.app.session.current, ScreenKind::Sonar);
     }
 }

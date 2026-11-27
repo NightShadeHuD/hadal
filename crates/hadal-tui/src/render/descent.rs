@@ -5,11 +5,13 @@ use hadal_core::StateView;
 use hadal_core::content::ids::HullId;
 use hadal_core::content::tables;
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
+use super::canvas::Canvas;
 use crate::glyphs::{self, Glyphs};
 use crate::model;
 use crate::render::{
@@ -91,34 +93,41 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     } else {
         0
     };
+    // Show the schematic when the terminal is at least 100 columns wide
+    // (content width is the terminal width minus the two frame border cells).
+    let schematic_height = if area.width >= 100 { 4u16 } else { 0 };
     let rows = Layout::vertical([
         Constraint::Length(top_height),
-        Constraint::Length(1),         // rule
-        Constraint::Min(0),            // hull tree
-        Constraint::Length(1),         // rule
-        Constraint::Length(selection), // selection explainer
-        Constraint::Length(1),         // governor
-        Constraint::Length(1),         // notice
-        Constraint::Length(coach),     // reserved coach
-        Constraint::Length(1),         // footer
+        Constraint::Length(schematic_height), // hull schematic (0 if width < 100)
+        Constraint::Length(1),                // rule
+        Constraint::Min(0),                   // hull tree
+        Constraint::Length(1),                // rule
+        Constraint::Length(selection),        // selection explainer
+        Constraint::Length(1),                // governor
+        Constraint::Length(1),                // notice
+        Constraint::Length(coach),            // reserved coach
+        Constraint::Length(1),                // footer
     ])
-    .areas::<9>(content);
+    .areas::<10>(content);
 
     render_top(frame, rows[0], ui, g);
-    render_rule(frame, rows[1], &p, g);
-    render_hull_tree(frame, rows[2], ui, g, &mut hits);
-    render_rule(frame, rows[3], &p, g);
-    render_selection(frame, rows[4], ui);
-    render_governor(frame, rows[5], ui);
-    render_notice(frame, rows[6], ui);
-    render_footer(frame, rows[8], ui, g);
+    if schematic_height > 0 {
+        render_hull_schematic(frame, rows[1], ui);
+    }
+    render_rule(frame, rows[2], &p, g);
+    render_hull_tree(frame, rows[3], ui, g, &mut hits);
+    render_rule(frame, rows[4], &p, g);
+    render_selection(frame, rows[5], ui);
+    render_governor(frame, rows[6], ui);
+    render_notice(frame, rows[7], ui);
+    render_footer(frame, rows[9], ui, g);
 
     hits.tutorial_target = match ui.coach_target() {
         Some(TutorialTarget::Hull(id)) => hits.hulls.iter().find_map(|(rect, index)| {
             let target = model::flattened_hulls().iter().position(|hull| *hull == id);
             (Some(*index) == target).then_some(*rect)
         }),
-        Some(TutorialTarget::HelpKey) => Some(rows[8]),
+        Some(TutorialTarget::HelpKey) => Some(rows[9]),
         _ => hits
             .tabs
             .iter()
@@ -129,6 +138,97 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         render_confirmation(frame, ui);
     }
     hits
+}
+
+// ---------------------------------------------------------------------
+// Hull schematic (width >= 100 only)
+// ---------------------------------------------------------------------
+
+/// Draw the hull schematic as a legible text slot grid (width >= 100 only).
+fn render_hull_schematic(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
+    let view = ui.view;
+    let ascii = ui.ascii;
+    let owned = view.hull_count();
+
+    // Row 0: title and ownership count.
+    let header = Line::from(vec![
+        Span::styled("HULL SCHEMATIC", bold_amber(p)),
+        Span::styled(format!("  {}/17 owned", count(owned as u32)), dim(p)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(header),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+
+    let branches = &model::HULL_BRANCHES;
+    let label = |name: &'static str| Span::styled(format!("{name}  "), dim(p));
+
+    // Row 1: AUTOMATION hulls.
+    let mut line = vec![label(branches[0].0)];
+    line.extend(schematic_slots(view, branches[0].1, p, ascii));
+    frame.render_widget(
+        Paragraph::new(Line::from(line)),
+        Rect::new(area.x, area.y + 1, area.width, 1),
+    );
+
+    // Row 2: SIGNAL, ENDURANCE and DESCENT hulls on one row.
+    let mut line = vec![label(branches[1].0)];
+    line.extend(schematic_slots(view, branches[1].1, p, ascii));
+    line.push(Span::styled("   ", dim(p)));
+    line.push(label(branches[2].0));
+    line.extend(schematic_slots(view, branches[2].1, p, ascii));
+    line.push(Span::styled("   ", dim(p)));
+    line.push(label(branches[3].0));
+    line.extend(schematic_slots(view, branches[3].1, p, ascii));
+    frame.render_widget(
+        Paragraph::new(Line::from(line)),
+        Rect::new(area.x, area.y + 2, area.width, 1),
+    );
+
+    // Row 3: dim keel line, K-9 mark, and the shape legend.
+    let (keel_glyph, legend) = if ascii {
+        ("=", "# owned  : empty")
+    } else {
+        ("━", "█ owned  ░ empty")
+    };
+    let keel = keel_glyph.repeat(20);
+    let line = vec![
+        Span::styled(keel, dim(p)),
+        Span::styled("  K-9", dim(p)),
+        Span::styled("   ", dim(p)),
+        Span::styled(legend, dim(p)),
+    ];
+    frame.render_widget(
+        Paragraph::new(Line::from(line)),
+        Rect::new(area.x, area.y + 3, area.width, 1),
+    );
+}
+
+/// One `██`/`░░` slot per hull, in table order, separated by single spaces.
+fn schematic_slots(
+    view: StateView<'_>,
+    ids: &[HullId],
+    p: Palette,
+    ascii: bool,
+) -> Vec<Span<'static>> {
+    let (own, empty) = if ascii {
+        ("##", "::")
+    } else {
+        ("██", "░░")
+    };
+    let mut spans = Vec::with_capacity(ids.len() * 2);
+    for (i, id) in ids.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" ", dim(p)));
+        }
+        if view.hull_owned(*id) {
+            spans.push(Span::styled(own.to_owned(), accent(p)));
+        } else {
+            spans.push(Span::styled(empty.to_owned(), dim(p)));
+        }
+    }
+    spans
 }
 
 // ---------------------------------------------------------------------
@@ -143,7 +243,7 @@ fn render_top(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
     ])
     .areas::<3>(area);
 
-    render_gauge(frame, cols[0], ui, g);
+    render_trench(frame, cols[0], ui);
 
     let divider: Vec<Line> = (0..cols[1].height)
         .map(|_| Line::from(Span::styled(g.v_line.to_string(), dim(ui.palette))))
@@ -153,49 +253,251 @@ fn render_top(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
     render_card(frame, cols[2], ui, g);
 }
 
-fn render_gauge(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
-    if area.height < 3 {
+/// Trench viewport: `top_m ..= bottom_m` centred on `depth`.
+const TRENCH_TOP_OFFSET: u32 = 1200;
+const TRENCH_BOTTOM_OFFSET: u32 = 1800;
+const TRENCH_GHOST_OFFSET: u32 = 500; // metres to the next Descent
+const TRENCH_RAIL_X: u16 = 3; // rail column (panel col 3)
+const TRENCH_TRACE_X: u16 = 2; // trace column (panel col 2)
+const TRENCH_SECTION_X: u16 = 4; // strata start after the rail
+const TRENCH_STATION_X: u16 = 6; // silhouette left edge (panel cols 6-10)
+const TRENCH_STATION_W: u16 = 5;
+const TRENCH_BANDS: u16 = 4; // up to 4 silt bands (height permitting)
+const TRENCH_PING_MAX_PX: i32 = 6; // ping ring max radius in pixels
+
+/// CP437 shade glyph for the silt ramp, with an ASCII fallback.
+fn shade_glyph(level: u8, ascii: bool) -> char {
+    if ascii {
+        match level {
+            0 => ':',
+            1 => '+',
+            _ => '#',
+        }
+    } else {
+        match level {
+            0 => '░',
+            1 => '▒',
+            _ => '▓',
+        }
+    }
+}
+
+/// Write one styled cell into a buffer, ignoring out-of-bounds coordinates.
+fn put_cell(buf: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
+    if let Some(cell) = buf.cell_mut((x, y)) {
+        cell.set_char(ch);
+        cell.set_style(style);
+    }
+}
+
+/// A fresh 5×3-cell K-9 station silhouette canvas (`▄███▄` / `█████` / `▀███▀`).
+fn station_canvas(color: Color) -> Canvas {
+    let mut canvas = Canvas::new(5, 3);
+    // row 0: ▄███▄
+    canvas.put(0, 1, color);
+    for x in 1..=3 {
+        canvas.put(x, 0, color);
+        canvas.put(x, 1, color);
+    }
+    canvas.put(4, 1, color);
+    // row 1: █████
+    for x in 0..=4 {
+        canvas.put(x, 2, color);
+        canvas.put(x, 3, color);
+    }
+    // row 2: ▀███▀
+    canvas.put(0, 4, color);
+    for x in 1..=3 {
+        canvas.put(x, 4, color);
+        canvas.put(x, 5, color);
+    }
+    canvas.put(4, 4, color);
+    canvas
+}
+
+/// Draw the trench cross-section into `area` (22 cols wide).
+fn render_trench(frame: &mut Frame, area: Rect, ui: &UiState<'_>) {
+    let p = ui.palette;
+    let ascii = ui.ascii;
+    if area.height < 5 || area.width < 12 {
         return;
     }
-    let p = ui.palette;
     let depth = ui.view.depth_m();
-    let min_depth = tables::BASE_DEPTH_M;
-    let max_depth = 20_000u32;
+    let next_depth = depth.saturating_add(TRENCH_GHOST_OFFSET);
 
-    let rows = area.height as usize;
-    let mut lines: Vec<Line> = Vec::with_capacity(rows);
-    lines.push(Line::from(Span::styled("DEPTH GAUGE", dim(p))));
+    // Row 0: header. Last row: depth labels. The middle rows are strata.
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("TRENCH", dim(p)))),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    let strata_top = area.y + 1;
+    let strata_rows = area.height - 2;
+    let depth_row = area.y + area.height - 1;
+    let rail_x = area.x + TRENCH_RAIL_X;
+    let trace_x = area.x + TRENCH_TRACE_X;
+    let section_x = area.x + TRENCH_SECTION_X;
+    let panel_right = area.x + area.width;
+    let station_x = area.x + TRENCH_STATION_X;
+    let dim_style = Style::new().fg(p.dim).bg(p.bg);
+    let accent_style = Style::new().fg(p.accent).bg(p.bg);
+    let amber_style = Style::new().fg(p.amber).bg(p.bg);
 
-    let track_top = 1usize;
-    let track_bottom = rows.saturating_sub(1);
-    let span = track_bottom.saturating_sub(track_top);
-    let fraction = if max_depth > min_depth {
-        (f64::from(depth.saturating_sub(min_depth)) / f64::from(max_depth - min_depth))
-            .clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let marker = track_bottom.saturating_sub((fraction * span as f64).round() as usize);
-
-    for row in track_top..=track_bottom {
-        let is_marker = row == marker;
-        let mark = if is_marker { g.depth_gauge } else { g.v_line };
-        let label = if row == track_top {
-            format!("{:>6}", count(max_depth))
-        } else if row == track_bottom {
-            format!("{:>6}", count(min_depth))
-        } else if is_marker {
-            format!("{:>6}", count(depth))
-        } else {
-            "      ".to_owned()
-        };
-        let style = if is_marker { bold_amber(p) } else { dim(p) };
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {mark} "), style),
-            Span::styled(label, style),
-        ]));
+    // Silt bands: even shade rows split by single dim boundary rows. The rail
+    // is drawn for every section row so cols 0-3 stay continuous.
+    let bands = TRENCH_BANDS.min(strata_rows / 2).max(1);
+    let boundaries = bands - 1;
+    let shade_rows = strata_rows - boundaries;
+    let base = shade_rows / bands;
+    let rem = shade_rows % bands;
+    let ramp = [0u8, 1, 2, 1, 2];
+    let rail_glyph = if ascii { '|' } else { '│' };
+    let tick_glyph = if ascii { '+' } else { '├' };
+    let run_glyph = if ascii { '_' } else { '▁' };
+    let mut y = strata_top;
+    for b in 0..bands {
+        let rows = base + if b < rem { 1 } else { 0 };
+        let glyph = shade_glyph(ramp[(b as usize).min(ramp.len() - 1)], ascii);
+        for _ in 0..rows {
+            for x in section_x..panel_right {
+                put_cell(frame.buffer_mut(), x, y, glyph, dim_style);
+            }
+            put_cell(frame.buffer_mut(), rail_x, y, rail_glyph, dim_style);
+            y += 1;
+        }
+        if b + 1 < bands {
+            for x in section_x..panel_right {
+                put_cell(frame.buffer_mut(), x, y, run_glyph, dim_style);
+            }
+            put_cell(frame.buffer_mut(), rail_x, y, tick_glyph, dim_style);
+            y += 1;
+        }
     }
-    frame.render_widget(Paragraph::new(lines), area);
+
+    // Map absolute metres to a strata row (integer arithmetic only).
+    let pixel_h = strata_rows as i32 * 2;
+    let top_m = depth.saturating_sub(TRENCH_TOP_OFFSET);
+    let span = (TRENCH_TOP_OFFSET + TRENCH_BOTTOM_OFFSET).max(1) as i64;
+    let m_to_pixel = |m: u32| -> i32 {
+        let py = ((m as i64 - top_m as i64) * (pixel_h as i64 - 1)) / span;
+        (py as i32).clamp(0, pixel_h - 1)
+    };
+    let centre_rel = (m_to_pixel(depth) / 2).clamp(1, (strata_rows - 2) as i32) as u16;
+    let station_row = strata_top + centre_rel;
+
+    // Dim trace in the rail (col 2) from the top down to the station row.
+    let trace_glyph = if ascii { '.' } else { '·' };
+    for rel in 0..=centre_rel {
+        put_cell(
+            frame.buffer_mut(),
+            trace_x,
+            strata_top + rel,
+            trace_glyph,
+            dim_style,
+        );
+    }
+
+    // Next Descent: a single dim diamond on the rail, unmistakably pending.
+    let mut next_rel = (m_to_pixel(next_depth) / 2).clamp(0, (strata_rows - 1) as i32) as u16;
+    if next_rel == centre_rel {
+        next_rel = if centre_rel + 1 < strata_rows {
+            centre_rel + 1
+        } else {
+            centre_rel.saturating_sub(1)
+        };
+    }
+    let muted_glyph = if ascii { 'o' } else { '◇' };
+    put_cell(
+        frame.buffer_mut(),
+        rail_x,
+        strata_top + next_rel,
+        muted_glyph,
+        dim_style,
+    );
+
+    // The current station: an amber diamond on the rail plus the 5x3 amber K-9
+    // silhouette at panel cols 6-10 (off the rail, on top of the shade).
+    let tuned_glyph = if ascii { '*' } else { '◆' };
+    put_cell(
+        frame.buffer_mut(),
+        rail_x,
+        station_row,
+        tuned_glyph,
+        amber_style,
+    );
+    let marker_top = station_row - 1;
+    station_canvas(p.amber).blit(
+        frame.buffer_mut(),
+        Rect::new(station_x, marker_top, TRENCH_STATION_W, 3),
+        ui.settings.color_depth,
+        ascii,
+        p.bg,
+    );
+
+    // Ping: one accent ring every 2 s, centred on the station, clipped to the
+    // section so the rail and trace are never overwritten.
+    let radius = if ui.anim.reduce_motion {
+        TRENCH_PING_MAX_PX / 2
+    } else {
+        ((ui.anim.frame_ms % 2000) as i32) * TRENCH_PING_MAX_PX / 2000
+    };
+    if radius > 0 {
+        let ring_glyph = if ascii { '.' } else { '·' };
+        let cx = station_x as i32 + TRENCH_STATION_W as i32 / 2;
+        let cy = centre_rel as i32;
+        let lower = (radius - 1).max(0);
+        for ry in 0..strata_rows {
+            let abs_y = strata_top + ry;
+            for rx in 0..area.width {
+                let abs_x = area.x + rx;
+                // Never paint over the rail/trace (panel cols 0-3).
+                if abs_x < section_x {
+                    continue;
+                }
+                // Keep the silhouette opaque.
+                let over_station = abs_x >= station_x
+                    && abs_x < station_x + TRENCH_STATION_W
+                    && abs_y >= marker_top
+                    && abs_y <= marker_top + 2;
+                if over_station {
+                    continue;
+                }
+                let dx = abs_x as i32 - cx;
+                let dy = (ry as i32 - cy) * 2;
+                let d2 = dx * dx + dy * dy;
+                if d2 <= radius * radius && d2 > lower * lower {
+                    put_cell(frame.buffer_mut(), abs_x, abs_y, ring_glyph, accent_style);
+                }
+            }
+        }
+    }
+
+    // Bottom row: clear to bg, then write the depth (and next depth if it fits).
+    for x in area.x..panel_right {
+        put_cell(
+            frame.buffer_mut(),
+            x,
+            depth_row,
+            ' ',
+            Style::new().fg(p.bg).bg(p.bg),
+        );
+    }
+    let depth_text = format!("{} m", count(depth));
+    let next_text = format!("next {next_depth}");
+    let avail = area.width.saturating_sub(TRENCH_SECTION_X) as usize;
+    let label = if depth_text.chars().count() + 2 + next_text.chars().count() <= avail {
+        format!("{depth_text}  {next_text}")
+    } else {
+        depth_text
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(label, dim(p)))),
+        Rect::new(
+            section_x,
+            depth_row,
+            area.width.saturating_sub(TRENCH_SECTION_X),
+            1,
+        ),
+    );
 }
 
 fn render_card(frame: &mut Frame, area: Rect, ui: &UiState<'_>, g: &Glyphs) {
@@ -680,5 +982,399 @@ mod tests {
             .filter(|row| matches!(row, HullRow::Branch(_)))
             .count();
         assert_eq!(branches, 4);
+    }
+
+    #[test]
+    fn trench_section_has_lit_cells() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let engine = hadal_core::Engine::demo();
+        let view = engine.view();
+        let anim = crate::render::Anim::settled(view.echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+        let ui = crate::render::UiState::settled(
+            view,
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                let _ = render(frame, &ui);
+            })
+            .expect("draw frame");
+        let buffer = terminal.backend().buffer().clone();
+
+        // The trench gauge is in cols 0-21, rows 2-10 (approx).
+        // Count non-space cells in that region.
+        let mut lit = 0usize;
+        for y in 2..=10 {
+            for x in 0..22 {
+                let sym = buffer[(x, y)].symbol();
+                if sym != " " {
+                    lit += 1;
+                }
+            }
+        }
+        assert!(
+            lit >= 30,
+            "trench gauge should have >= 30 lit cells, got {}",
+            lit
+        );
+    }
+
+    #[test]
+    fn trench_marker_moves_with_depth() {
+        let engine1 = hadal_core::Engine::demo();
+        let engine2 = hadal_core::Engine::new();
+        let anim = crate::render::Anim::settled(engine1.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+
+        let ui1 = crate::render::UiState::settled(
+            engine1.view(),
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+        let ui2 = crate::render::UiState::settled(
+            engine2.view(),
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+
+        fn gauge_text(ui: &crate::render::UiState<'_>) -> String {
+            use ratatui::Terminal;
+            use ratatui::backend::TestBackend;
+            let backend = TestBackend::new(80, 24);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            let mut out = String::new();
+            for y in 2..=10 {
+                for x in 0..22 {
+                    out.push_str(buf[(x, y)].symbol());
+                }
+                out.push('\n');
+            }
+            out
+        }
+
+        let text1 = gauge_text(&ui1);
+        let text2 = gauge_text(&ui2);
+        assert_ne!(
+            text1, text2,
+            "different depths should produce different buffers"
+        );
+    }
+
+    #[test]
+    fn trench_art_deterministic_at_fixed_frame() {
+        let engine = hadal_core::Engine::demo();
+        let view = engine.view();
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+
+        fn render_frame(ui: &crate::render::UiState<'_>) -> String {
+            use ratatui::Terminal;
+            use ratatui::backend::TestBackend;
+            let backend = TestBackend::new(80, 24);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            let mut out = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    out.push_str(buf[(x, y)].symbol());
+                }
+                out.push('\n');
+            }
+            out
+        }
+
+        let anim1 = crate::render::Anim {
+            frame_ms: 1234,
+            ..crate::render::Anim::settled(view.echo())
+        };
+        let ui1 = crate::render::UiState::settled(
+            view,
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim1,
+        );
+        let text1 = render_frame(&ui1);
+
+        let anim2 = crate::render::Anim {
+            frame_ms: 1234,
+            ..crate::render::Anim::settled(view.echo())
+        };
+        let ui2 = crate::render::UiState::settled(
+            view,
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim2,
+        );
+        let text2 = render_frame(&ui2);
+
+        assert_eq!(text1, text2, "same frame_ms must produce identical output");
+    }
+
+    #[test]
+    fn trench_is_not_a_grid() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let engine = hadal_core::Engine::demo();
+        let depth = engine.view().depth_m();
+        let amber_color = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        )
+        .amber;
+        let anim = crate::render::Anim::settled(engine.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+        let ui = crate::render::UiState::settled(
+            engine.view(),
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                let _ = render(frame, &ui);
+            })
+            .expect("draw frame");
+        let buf = terminal.backend().buffer();
+
+        // Locate the gauge header, its depth label row, and the panel origin.
+        let depth_label = format!("{} m", count(depth));
+        let mut header_row = None;
+        let mut panel_x = 0u16;
+        let mut depth_row = None;
+        for y in 0..buf.area().height {
+            let mut line = String::new();
+            for x in 0..buf.area().width {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            if let Some(byte_pos) = line.find("TRENCH") {
+                header_row = Some(y);
+                panel_x = line[..byte_pos].chars().count() as u16;
+            } else if header_row.is_some() && line.contains(&depth_label) {
+                depth_row = Some(y);
+            }
+        }
+        let header_row = header_row.expect("trench header present");
+        let depth_row = depth_row.expect("trench depth label present");
+        let rail_x = panel_x + 3;
+        let station_x = panel_x + 6;
+
+        // Structural check: no strata row is more than 80% solid-block cells,
+        // and the rail glyph survives on every section row.
+        let blocky = |sym: &str| matches!(sym, "█" | "▀" | "▄");
+        for y in (header_row + 1)..depth_row {
+            let lit = (panel_x..panel_x + 22)
+                .filter(|&x| blocky(buf[(x, y)].symbol()))
+                .count();
+            assert!(
+                lit * 5 <= 22 * 4,
+                "strata row {y} is a grid: {lit}/22 block cells"
+            );
+            let rail = buf[(rail_x, y)].symbol();
+            assert!(
+                matches!(rail, "│" | "├" | "◆" | "◇"),
+                "rail glyph missing on section row {y}: {rail:?}"
+            );
+        }
+
+        // Marker check: the amber silhouette sits at cols 6-10, and the rail
+        // carries an amber ◆ at the mapped depth row.
+        let strata_rows = depth_row - header_row - 1;
+        let pixel_h = strata_rows as i32 * 2;
+        let py = (1200i64 * (pixel_h as i64 - 1) / 3000) as i32;
+        let marker_rel = (py / 2).clamp(1, strata_rows as i32 - 2) as u16;
+        let marker_row = header_row + 1 + marker_rel;
+        let mut amber = 0usize;
+        for y in marker_row.saturating_sub(1)..=(marker_row + 1) {
+            for x in station_x..(station_x + 5) {
+                if buf[(x, y)].fg == amber_color {
+                    amber += 1;
+                }
+            }
+        }
+        assert!(
+            amber >= 3,
+            "marker row {marker_row} should have >= 3 amber cells at cols 6-10, got {amber}"
+        );
+        assert_eq!(
+            buf[(rail_x, marker_row)].symbol(),
+            "◆",
+            "current station must mark the rail with ◆ at the mapped row"
+        );
+        assert_eq!(
+            buf[(rail_x, marker_row)].fg,
+            amber_color,
+            "the rail diamond must be amber"
+        );
+    }
+
+    #[test]
+    fn hull_schematic_slot_pairs_match_owned() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        fn slot_pairs(ui: &crate::render::UiState<'_>) -> usize {
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            let mut header_row = None;
+            for y in 0..buf.area().height {
+                let mut line = String::new();
+                for x in 0..buf.area().width {
+                    line.push_str(buf[(x, y)].symbol());
+                }
+                if line.contains("HULL SCHEMATIC") {
+                    header_row = Some(y);
+                    break;
+                }
+            }
+            let header_row = header_row.expect("schematic header present at 100x30");
+            let mut pairs = 0usize;
+            for y in (header_row + 1)..=(header_row + 2) {
+                let mut line = String::new();
+                for x in 0..buf.area().width {
+                    line.push_str(buf[(x, y)].symbol());
+                }
+                pairs += line.matches("██").count();
+            }
+            pairs
+        }
+
+        let engine_demo = hadal_core::Engine::demo();
+        let engine_new = hadal_core::Engine::new();
+        let anim = crate::render::Anim::settled(engine_demo.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+
+        let ui_demo = crate::render::UiState::settled(
+            engine_demo.view(),
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+        let ui_new = crate::render::UiState::settled(
+            engine_new.view(),
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+
+        let pairs_demo = slot_pairs(&ui_demo);
+        let pairs_new = slot_pairs(&ui_new);
+        assert_eq!(
+            pairs_demo,
+            engine_demo.view().hull_count(),
+            "owned slot pairs must equal the owned hull count"
+        );
+        assert_eq!(
+            pairs_new,
+            engine_new.view().hull_count(),
+            "owned slot pairs must equal the owned hull count"
+        );
+        assert!(
+            pairs_demo > pairs_new,
+            "demo should light more slots ({pairs_demo}) than new ({pairs_new})"
+        );
+    }
+
+    #[test]
+    fn hull_schematic_hidden_below_100() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        fn screen_text(width: u16, height: u16, ui: &crate::render::UiState<'_>) -> String {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            let mut out = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    out.push_str(buf[(x, y)].symbol());
+                }
+                out.push('\n');
+            }
+            out
+        }
+
+        let engine = hadal_core::Engine::demo();
+        let anim = crate::render::Anim::settled(engine.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+        let ui = crate::render::UiState::settled(
+            engine.view(),
+            pal,
+            false,
+            crate::render::Screen::Descent,
+            &anim,
+        );
+
+        let text_80 = screen_text(80, 24, &ui);
+        let text_100 = screen_text(100, 30, &ui);
+
+        assert!(
+            !text_80.contains("HULL SCHEMATIC"),
+            "80x24 should not contain HULL SCHEMATIC"
+        );
+        assert!(
+            text_100.contains("HULL SCHEMATIC"),
+            "100x30 should contain HULL SCHEMATIC"
+        );
     }
 }

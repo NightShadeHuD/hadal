@@ -42,6 +42,10 @@ pub struct HitMap {
     pub help_visible: usize,
     /// The highlighted tutorial target's visible rect.
     pub tutorial_target: Option<Rect>,
+    /// SONAR radar disc rect.
+    pub radar: Option<Rect>,
+    /// SONAR waveform rect.
+    pub wave: Option<Rect>,
 }
 
 fn contains(rect: Rect, x: u16, y: u16) -> bool {

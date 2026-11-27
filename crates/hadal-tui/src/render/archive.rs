@@ -5,6 +5,7 @@ use hadal_core::TICKS_PER_SECOND;
 use hadal_core::content::story::log_text;
 use hadal_core::content::tables;
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -232,8 +233,27 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
     .areas::<4>(content);
     let (body, rule, _, footer) = (rows_area[0], rows_area[1], rows_area[2], rows_area[3]);
 
-    let visible = body.height as usize;
-    let all = content_rows(view, body.width.saturating_sub(2) as usize, ui.ascii);
+    // Show the signal map when the terminal is at least 100 columns wide
+    // (content width is the terminal width minus the two frame border cells).
+    let show_signal_map = area.width >= 100;
+    let panel_width: u16 = if show_signal_map { 30 } else { 0 };
+    let divider_width: u16 = if show_signal_map { 1 } else { 0 };
+
+    let list_width = if show_signal_map {
+        body.width
+            .saturating_sub(panel_width)
+            .saturating_sub(divider_width)
+    } else {
+        body.width
+    };
+    let list_area = if show_signal_map {
+        Rect::new(body.x, body.y, list_width, body.height)
+    } else {
+        body
+    };
+
+    let visible = list_area.height as usize;
+    let all = content_rows(view, list_width.saturating_sub(2) as usize, ui.ascii);
     let total = all.len();
     let start = ui.archive_scroll.min(total.saturating_sub(visible));
     let lines: Vec<Line> = all
@@ -248,7 +268,27 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
             line
         })
         .collect();
-    frame.render_widget(Paragraph::new(lines), body);
+    frame.render_widget(Paragraph::new(lines), list_area);
+
+    if show_signal_map {
+        let divider_area = Rect::new(
+            list_area.x + list_area.width,
+            list_area.y,
+            divider_width,
+            list_area.height,
+        );
+        let divider_lines: Vec<Line> = (0..divider_area.height)
+            .map(|_| Line::from(Span::styled(g.v_line.to_string(), dim(p))))
+            .collect();
+        frame.render_widget(Paragraph::new(divider_lines), divider_area);
+        let panel_area = Rect::new(
+            divider_area.x + divider_area.width,
+            list_area.y,
+            panel_width,
+            list_area.height,
+        );
+        render_signal_map(frame, panel_area, ui, recorded);
+    }
 
     render_rule(frame, rule, &p, g);
     let end = start.saturating_add(visible).min(total);
@@ -277,6 +317,170 @@ pub fn render(frame: &mut Frame, ui: &UiState<'_>) -> HitMap {
         }),
     };
     hits
+}
+
+// ---------------------------------------------------------------------
+// Signal map panel (width >= 100 only)
+// ---------------------------------------------------------------------
+
+/// Write one styled cell into a buffer, ignoring out-of-bounds coordinates.
+fn put_cell(buf: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
+    if let Some(cell) = buf.cell_mut((x, y)) {
+        cell.set_char(ch);
+        cell.set_style(style);
+    }
+}
+
+/// Draw the signal map as a 5×2 serpentine of log slots.
+///
+/// The wire runs left→right on even rows and right→left on odd rows, with the
+/// vertical drop on alternating outer edges, so consecutive logs are joined by
+/// box-drawing links rather than free-form lines.
+fn render_signal_map(frame: &mut Frame, area: Rect, ui: &UiState<'_>, recorded: usize) {
+    let p = ui.palette;
+    let ascii = ui.ascii;
+    if area.width < 30 || area.height < 8 {
+        return;
+    }
+
+    // Header row.
+    let header = if ascii {
+        format!("SIG MAP  {}/10", count(recorded as u32))
+    } else {
+        format!("SIGNAL MAP  {}/10", count(recorded as u32))
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(header, bold_amber(p)))),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+
+    // Five evenly spaced slot rows between the header and the legend.
+    let legend_row = area.y + area.height - 1;
+    let top = 1u16;
+    let bottom = area.height.saturating_sub(2);
+    let step = (bottom.saturating_sub(top) / 4).max(1);
+    let slot_rows: [u16; 5] = [
+        top,
+        top + step,
+        top + step * 2,
+        top + step * 3,
+        top + step * 4,
+    ];
+
+    let recorded_set: Vec<bool> = tables::LOGS
+        .iter()
+        .map(|id| ui.view.log_recorded(*id))
+        .collect();
+    let newest = recorded_set
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| **r)
+        .map(|(i, _)| i)
+        .max()
+        .unwrap_or(0);
+
+    // Serpentine order: even rows are (2r, 2r+1); odd rows swap the sides.
+    let log_at = |row: usize, left: bool| -> usize {
+        if row.is_multiple_of(2) {
+            if left { row * 2 } else { row * 2 + 1 }
+        } else if left {
+            row * 2 + 1
+        } else {
+            row * 2
+        }
+    };
+
+    let (own, locked, hot) = if ascii {
+        ("##", "..", "%%")
+    } else {
+        ("██", "··", "▓▓")
+    };
+    let link_h = if ascii { '-' } else { '─' };
+    let link_v = if ascii { '|' } else { '│' };
+    let ring_glyph = if ascii { 'o' } else { '○' };
+    let pulse_on = ui.anim.reduce_motion || (ui.anim.frame_ms % 1600) < 800;
+
+    let left_slot = 2u16; // relative to area.x, one-cell margin from the divider
+    let right_slot = 23u16;
+    let slot_len = 5u16;
+    let left_lane = left_slot - 1;
+    let right_lane = right_slot + slot_len;
+
+    // Horizontal links between the two slots on each row.
+    for &rel_row in &slot_rows {
+        let y = area.y + rel_row;
+        for rel_x in (left_slot + slot_len)..right_slot {
+            put_cell(frame.buffer_mut(), area.x + rel_x, y, link_h, dim(p));
+        }
+    }
+
+    // Vertical links between consecutive slot rows, alternating outer edges.
+    for i in 0..4usize {
+        let from = slot_rows[i];
+        let to = slot_rows[i + 1];
+        let lane = if i.is_multiple_of(2) {
+            right_lane
+        } else {
+            left_lane
+        };
+        for rel_row in (from + 1)..to {
+            put_cell(
+                frame.buffer_mut(),
+                area.x + lane,
+                area.y + rel_row,
+                link_v,
+                dim(p),
+            );
+        }
+    }
+
+    // Slots: `nn ██` recorded / `nn ··` locked; the newest recorded is amber.
+    for (row, &rel_row) in slot_rows.iter().enumerate() {
+        let y = area.y + rel_row;
+        for left in [true, false] {
+            let log = log_at(row, left);
+            if log >= tables::LOGS.len() {
+                continue;
+            }
+            let rel_x = if left { left_slot } else { right_slot };
+            let is_recorded = recorded_set[log];
+            let is_newest = is_recorded && log == newest;
+            let pair = if is_newest {
+                Span::styled(hot.to_owned(), Style::new().fg(p.amber))
+            } else if is_recorded {
+                Span::styled(own.to_owned(), accent(p))
+            } else {
+                Span::styled(locked.to_owned(), dim(p))
+            };
+            let number = Span::styled(format!("{:02} ", log + 1), dim(p));
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![number, pair])),
+                Rect::new(area.x + rel_x, y, slot_len, 1),
+            );
+            // Newest recorded: pulse a one-cell ring on the outer edge.
+            if is_newest && pulse_on {
+                let ring_x = area.x + if left { left_lane } else { right_lane };
+                put_cell(
+                    frame.buffer_mut(),
+                    ring_x,
+                    y,
+                    ring_glyph,
+                    Style::new().fg(p.accent),
+                );
+            }
+        }
+    }
+
+    // Bottom legend.
+    let legend = if ascii {
+        "## recorded   .. locked"
+    } else {
+        "██ recorded   ·· locked"
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(legend, dim(p)))),
+        Rect::new(area.x, legend_row, area.width, 1),
+    );
 }
 
 fn styled_row(row: &ArchiveRow, p: P) -> Line<'static> {
@@ -370,5 +574,259 @@ mod tests {
         assert_eq!(format_uptime(10 * 61), "0:01:01");
         assert_eq!(format_uptime(10 * 3600), "1:00:00");
         assert_eq!(format_uptime(3_600_000), "100:00:00");
+    }
+
+    #[test]
+    fn signal_map_has_ten_indexed_nodes() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        fn panel_rows(ui: &crate::render::UiState<'_>) -> Vec<String> {
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+
+            let row_text = |y: u16| -> String {
+                let mut line = String::new();
+                for x in 0..buf.area().width {
+                    line.push_str(buf[(x, y)].symbol());
+                }
+                line
+            };
+
+            let mut header_row = None;
+            let mut panel_x = 0usize;
+            for y in 0..buf.area().height {
+                let line = row_text(y);
+                if let Some(byte_pos) = line.find("SIGNAL MAP") {
+                    panel_x = line[..byte_pos].chars().count();
+                    header_row = Some(y);
+                    break;
+                }
+            }
+            let header_row = header_row.expect("signal map panel present at 100x30");
+
+            let mut legend_row = None;
+            for y in (0..buf.area().height).rev() {
+                if row_text(y).contains("recorded") {
+                    legend_row = Some(y);
+                    break;
+                }
+            }
+            let legend_row = legend_row.expect("signal map legend present");
+
+            ((header_row + 1)..legend_row)
+                .map(|y| row_text(y).chars().skip(panel_x).take(30).collect())
+                .collect()
+        }
+
+        let engine = hadal_core::Engine::demo();
+        let anim = crate::render::Anim::settled(engine.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+        let ui = crate::render::UiState::settled(
+            engine.view(),
+            pal,
+            false,
+            crate::render::Screen::Archive,
+            &anim,
+        );
+
+        let rows = panel_rows(&ui);
+        for n in 1..=10 {
+            let token = format!("{n:02}");
+            let count: usize = rows.iter().map(|row| row.matches(&token).count()).sum();
+            assert_eq!(count, 1, "log index {token} should appear exactly once");
+        }
+
+        let recorded = tables::LOGS
+            .iter()
+            .filter(|id| ui.view.log_recorded(**id))
+            .count();
+        let pairs: usize = rows
+            .iter()
+            .map(|row| row.matches("██").count() + row.matches("▓▓").count())
+            .sum();
+        assert_eq!(
+            pairs, recorded,
+            "recorded slot pairs must equal the recorded log count"
+        );
+    }
+
+    #[test]
+    fn archive_constellation_lights_recorded_logs() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        fn bright_cells(ui: &crate::render::UiState<'_>, pal: crate::theme::Palette) -> usize {
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            // Bright (accent/amber) cells carry the recorded state; locked
+            // slots are dim, so they do not count as lit.
+            let mut lit = 0usize;
+            for y in 0..buf.area().height {
+                for x in 68..98 {
+                    let fg = buf[(x, y)].fg;
+                    if fg == pal.accent || fg == pal.amber {
+                        lit += 1;
+                    }
+                }
+            }
+            lit
+        }
+
+        let engine_demo = hadal_core::Engine::demo();
+        let engine_new = hadal_core::Engine::new();
+        let anim = crate::render::Anim::settled(engine_demo.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+
+        let ui_demo = crate::render::UiState::settled(
+            engine_demo.view(),
+            pal,
+            false,
+            crate::render::Screen::Archive,
+            &anim,
+        );
+        let ui_new = crate::render::UiState::settled(
+            engine_new.view(),
+            pal,
+            false,
+            crate::render::Screen::Archive,
+            &anim,
+        );
+
+        let lit_demo = bright_cells(&ui_demo, pal);
+        let lit_new = bright_cells(&ui_new, pal);
+        assert!(
+            lit_demo > lit_new,
+            "demo should light more recorded slots ({lit_demo}) than new ({lit_new})"
+        );
+    }
+
+    #[test]
+    fn archive_constellation_hidden_below_100() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        fn screen_text(width: u16, height: u16, ui: &crate::render::UiState<'_>) -> String {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            let mut out = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    out.push_str(buf[(x, y)].symbol());
+                }
+                out.push('\n');
+            }
+            out
+        }
+
+        let engine = hadal_core::Engine::demo();
+        let anim = crate::render::Anim::settled(engine.view().echo());
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+        let ui = crate::render::UiState::settled(
+            engine.view(),
+            pal,
+            false,
+            crate::render::Screen::Archive,
+            &anim,
+        );
+
+        let text_80 = screen_text(80, 24, &ui);
+        let text_100 = screen_text(100, 30, &ui);
+
+        assert!(
+            !text_80.contains("SIGNAL MAP"),
+            "80x24 should not contain SIGNAL MAP"
+        );
+        assert!(
+            text_100.contains("SIGNAL MAP"),
+            "100x30 should contain SIGNAL MAP"
+        );
+    }
+
+    #[test]
+    fn archive_art_deterministic_at_fixed_frame() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let engine = hadal_core::Engine::demo();
+        let view = engine.view();
+        let pal = crate::theme::Palette::resolve(
+            crate::theme::Theme::Abyss,
+            crate::theme::ColorDepth::Auto,
+        );
+
+        fn render_frame(ui: &crate::render::UiState<'_>) -> String {
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, ui);
+                })
+                .expect("draw frame");
+            let buf = terminal.backend().buffer();
+            let mut out = String::new();
+            for y in 0..buf.area().height {
+                for x in 0..buf.area().width {
+                    out.push_str(buf[(x, y)].symbol());
+                }
+                out.push('\n');
+            }
+            out
+        }
+
+        let anim1 = crate::render::Anim {
+            frame_ms: 777,
+            ..crate::render::Anim::settled(view.echo())
+        };
+        let ui1 = crate::render::UiState::settled(
+            view,
+            pal,
+            false,
+            crate::render::Screen::Archive,
+            &anim1,
+        );
+        let text1 = render_frame(&ui1);
+
+        let anim2 = crate::render::Anim {
+            frame_ms: 777,
+            ..crate::render::Anim::settled(view.echo())
+        };
+        let ui2 = crate::render::UiState::settled(
+            view,
+            pal,
+            false,
+            crate::render::Screen::Archive,
+            &anim2,
+        );
+        let text2 = render_frame(&ui2);
+
+        assert_eq!(text1, text2, "same frame_ms must produce identical output");
     }
 }

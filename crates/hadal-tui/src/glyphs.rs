@@ -7,37 +7,13 @@
 pub const UNICODE: Glyphs = Glyphs {
     h_line: '─',
     v_line: '│',
-    lt_corner: '┌',
-    rt_corner: '┐',
-    lb_corner: '└',
-    rb_corner: '┘',
-    t_cross: '┬',
-    b_cross: '┴',
     l_cross: '├',
     r_cross: '┤',
-    dot: '·',
-    dash: '‐',
     bar: '█',
     bar_empty: '░',
-    scope_dot: '•',
-    scope_ring: '◦',
-    scope_cross: '×',
-    arrow_right: '→',
-    arrow_left: '←',
     arrow_up: '↑',
     arrow_down: '↓',
     chevron_right: '›',
-    chevron_left: '‹',
-    star: '★',
-    star_empty: '☆',
-    check: "✓",
-    x_mark: "✗",
-    separator: '┄',
-    capacitor_full: '█',
-    capacitor_empty: '░',
-    carrier_tuned: '◆',
-    carrier_muted: '◇',
-    depth_gauge: '▼',
 };
 
 // ---------------------------------------------------------------------
@@ -47,37 +23,13 @@ pub const UNICODE: Glyphs = Glyphs {
 pub const ASCII: Glyphs = Glyphs {
     h_line: '-',
     v_line: '|',
-    lt_corner: '+',
-    rt_corner: '+',
-    lb_corner: '+',
-    rb_corner: '+',
-    t_cross: '+',
-    b_cross: '+',
     l_cross: '+',
     r_cross: '+',
-    dot: '.',
-    dash: '-',
     bar: '#',
     bar_empty: ':',
-    scope_dot: '*',
-    scope_ring: 'o',
-    scope_cross: 'x',
-    arrow_right: '>',
-    arrow_left: '<',
     arrow_up: '^',
     arrow_down: 'v',
     chevron_right: '>',
-    chevron_left: '<',
-    star: '*',
-    star_empty: ' ',
-    check: "[+]",
-    x_mark: "[-]",
-    separator: '.',
-    capacitor_full: '#',
-    capacitor_empty: ':',
-    carrier_tuned: '*',
-    carrier_muted: 'o',
-    depth_gauge: 'v',
 };
 
 // ---------------------------------------------------------------------
@@ -86,44 +38,19 @@ pub const ASCII: Glyphs = Glyphs {
 
 /// A set of display glyphs.
 ///
-/// The set is intentionally complete (scope dots, depth gauge, carrier strip,
-/// stars) so later phases never emit a glyph absent from the active set.
-#[allow(dead_code)]
+/// Only glyphs the renderer actually draws are present, so an added glyph
+/// never silently diverges from the active set.
 #[derive(Clone, Copy, Debug)]
 pub struct Glyphs {
     pub h_line: char,
     pub v_line: char,
-    pub lt_corner: char,
-    pub rt_corner: char,
-    pub lb_corner: char,
-    pub rb_corner: char,
-    pub t_cross: char,
-    pub b_cross: char,
     pub l_cross: char,
     pub r_cross: char,
-    pub dot: char,
-    pub dash: char,
     pub bar: char,
     pub bar_empty: char,
-    pub scope_dot: char,
-    pub scope_ring: char,
-    pub scope_cross: char,
-    pub arrow_right: char,
-    pub arrow_left: char,
     pub arrow_up: char,
     pub arrow_down: char,
     pub chevron_right: char,
-    pub chevron_left: char,
-    pub star: char,
-    pub star_empty: char,
-    pub check: &'static str,
-    pub x_mark: &'static str,
-    pub separator: char,
-    pub capacitor_full: char,
-    pub capacitor_empty: char,
-    pub carrier_tuned: char,
-    pub carrier_muted: char,
-    pub depth_gauge: char,
 }
 
 /// Return the glyph set for the current mode.
@@ -151,8 +78,8 @@ mod tests {
         let g = set(true);
         assert_eq!(g.h_line, '-');
         assert_eq!(g.v_line, '|');
-        assert_eq!(g.lt_corner, '+');
-        assert_eq!(g.rb_corner, '+');
+        assert_eq!(g.l_cross, '+');
+        assert_eq!(g.r_cross, '+');
     }
 
     #[test]
@@ -163,24 +90,13 @@ mod tests {
         for glyph in [
             g.h_line,
             g.v_line,
-            g.lt_corner,
-            g.rt_corner,
-            g.lb_corner,
-            g.rb_corner,
-            g.t_cross,
-            g.b_cross,
             g.l_cross,
             g.r_cross,
-            g.dot,
             g.bar,
             g.bar_empty,
-            g.scope_dot,
-            g.scope_ring,
-            g.scope_cross,
-            g.carrier_tuned,
-            g.carrier_muted,
-            g.depth_gauge,
-            g.separator,
+            g.arrow_up,
+            g.arrow_down,
+            g.chevron_right,
         ] {
             assert_eq!(
                 glyph.width(),
@@ -188,11 +104,5 @@ mod tests {
                 "glyph {glyph:?} is not single-width"
             );
         }
-
-        // check/x_mark are single-character in Unicode, multi-char in ASCII.
-        assert_eq!(set(false).check.chars().count(), 1);
-        assert_eq!(set(false).x_mark.chars().count(), 1);
-        assert_eq!(set(true).check, "[+]");
-        assert_eq!(set(true).x_mark, "[-]");
     }
 }

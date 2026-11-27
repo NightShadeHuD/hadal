@@ -1,0 +1,28 @@
+---
+source: crates/hadal-tui/src/golden.rs
+expression: "draw(80, 24, &ui)"
+---
+┌ HADAL ── DESCENT ────────────────────────────── DEPTH 9,412 m ── DESCENTS 12 ┐
+│ 1 SONAR  [2 DESCENT]  3 ARCHIVE   4 SYSTEM                                   │
+│TRENCH                │RUN    peak 910M   rate 36.3M/s                        │
+│  ·│░░░░░░░░░░░░░░░░░░│  descents 12  best 840B  era F 120  life F 300        │
+│  ·│░░▄███▄░░░░░░░░░░░│DESCENT +16 FATHOMS   READY                            │
+│  ·◆▁▁█████▁▁▁▁▁▁▁▁▁▁▁│NEXT    1.00B  ████████░░  83%                         │
+│   ◇▒▒▀███▀▒▒▒▒▒▒▒▒▒▒▒│RESETS Echo · Peak Echo · Generators                   │
+│   │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│       Signal Chain upgrades · Pulse capacitor         │
+│   ├▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│       Carrier tuning · Run tick counters              │
+│   │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│PERSISTS Fathoms · Era Fathoms · Lifetime Fathoms      │
+│    9,412 m  next 9912│         Hulls · Achievements · Logs · Depth           │
+├──────────────────────────────────────────────────────────────────────────────┤
+│HULL TREE   15/17 owned   ↑↓ focus   Enter buy                                │
+│▶ Auto-Pulse           1F OWNED  Fires a pulse whenever the capacitor is full.│
+├──────────────────────────────────────────────────────────────────────────────┤
+│BALLAST GOVERNOR OFF   -/+ adjust (Shift 10)   valid OFF or 3-1,000,000       │
+│                                                                              │
+│  TUTORIAL 09/13 · FIRST SIGNAL              TARGET HULL AUTO-PULSE  [S] SKIP │
+│  On DESCENT, select Auto-Pulse and press Enter. It costs 1 Fathom.           │
+│  Auto-Pulse fires the capacitor whenever it fills, so K-9 pulses without you.│
+│  Hulls persist.                                                              │
+│[READY] owned                                                                 │
+│↑↓ focus  Enter buy  p+y descend  +/- target  Esc back  ? manual  1 sonar     │
+└──────────────────────────────────────────────────────────────────────────────┘
