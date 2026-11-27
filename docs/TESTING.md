@@ -11,7 +11,7 @@ policy, the gate, and the number anchor rule.
 | **Determinism** | Fixed action scripts → pinned SHA-256 state hash; round-trip and load-continuation hashes |
 | **Save/FS** | Round-trip, checksum tamper, future schema, unknown fields, backup fallback, corrupt/non-UTF8 preservation, import/export, migration injection, atomic write, lock error mapping |
 | **Pacing** | Release-mode `active`/`idle`/`offline` sim profiles and the `pacing` integration test |
-| **TUI** | 20 insta goldens at 80×24, 100×30, 140×40; overlays; boot; ASCII/mono; keymap; too-small; terminal restore; end-to-end session; resize storm; reduce motion |
+| **TUI** | 37 insta goldens at 80×24, 100×30, 140×40; overlays; boot; ASCII/mono; keymap; too-small; terminal restore; end-to-end session; resize storm; reduce motion |
 | **CI** | fmt, clippy `-D warnings`, tests, pacing, MSRV, `cargo-deny`, release builds |
 
 Tests are behaviour-first; no tautologies or source-text assertions. Pacing is a release-mode
@@ -51,36 +51,37 @@ Measured (debug unless noted):
 
 | Suite | Tests |
 |---|---|
-| `hadal-core --lib` | 208 |
-| `hadal` (TUI + headless) | 182 |
+| `hadal-core --lib` | 210 |
+| `hadal` (TUI + headless) | 229 |
 | `hadal-sim` | 8 |
 | `pacing` (release) | 1 |
-| **Total** | **399** |
+| **Total** | **448** |
 
-`tools/test-floor.txt` currently reads `247`. The floor may only **rise**; the gate refuses a
-count below it, and the infra worker raises it to the measured **399**.
+`tools/test-floor.txt` currently reads `448`. The floor may only **rise**; the gate refuses a
+count below it, and the infra worker raises it to the measured **448**.
 
 The `pacing` integration test takes **26.69 s in debug** but **1.73 s in release**; the gate
 runs it in release. The `active` sim assertion runs in **~1.5 s** wall.
 
 ## Golden / snapshot policy
 
-TUI layout goldens use **insta** (`=1.49.0`) with a `TestBackend` at three sizes (80×24,
-100×30, 140×40). There are **34** goldens:
+TUI layout goldens use **insta** (`=1.49.0`) with a `TestBackend` at three sizes (80×24, 100×30, 140×40). There are **37** goldens:
 
-- `boot_100x30`, `too_small_79x24`, `demo_banner_100x30`
-- `coach_step0_80x24`, `coach_step0_100x30`, `coach_waiting_hydro_80x24`,
-  `coach_tune_waiting_80x24`, `coach_hull_descent_80x24`, `coach_offline_80x24`,
-  `coach_ascii_80x24`, `skip_confirm_80x24`
-- `sonar_80x24_unicode`, `sonar_100x30_unicode`, `sonar_140x40`
-- `sonar_80x24_ascii`, `sonar_100x30_ascii`, `sonar_80x24_mono`, `sonar_completed_80x24`
-- `descent_80x24`, `descent_100x30`, `descent_140x40`, `confirm_descent_80x24`
+- `boot_graphical_100x30`, `boot_graphical_ascii_80x24`, `boot_graphical_stage0_80x24`, `boot_graphical_stage1_80x24`
+- `coach_graphical_step0_80x24`, `coach_graphical_step0_100x30`, `coach_graphical_nudge_80x24`,
+  `coach_graphical_chain_80x24`, `coach_graphical_peak_80x24`, `coach_graphical_hull_80x24`,
+  `coach_graphical_system_80x24`, `coach_graphical_ascii_80x24`, `skip_confirm_80x24`
+- `sonar_graphical_80x24`, `sonar_graphical_100x30`, `sonar_graphical_140x40`,
+  `sonar_graphical_ascii_80x24`, `sonar_graphical_mono_80x24`
+- `descent_80x24`, `descent_100x30`, `descent_140x40`, `descent_hull_schematic_100x30`,
+  `confirm_descent_80x24`
 - `archive_80x24`, `archive_100x30`, `archive_locked_100x30`
 - `system_80x24`, `system_100x30`, `system_save_failure_80x24`, `system_tutorial_80x24`
 - `help_80x24`, `help_glossary_80x24`
-- `offline_summary_80x24`, `import_80x24`, `reset_80x24`
+- `offline_summary_80x24`, `import_80x24`, `reset_80x24`, `too_small_79x24`
+- `demo_graphical_100x30`
 
-Workflow:
+Note: the gate receipt's `tests=448` counts the pacing test via `--list` (it appears in `cargo test --workspace --all-features -- --list`); the default gate does not execute pacing — it requires `--release-pacing`.
 
 - Change a screen or layout, then regenerate with `INSTA_UPDATE=always cargo test -p hadal`.
 - Inspect the resulting `.snap` diffs before committing; goldens verify layout structure and

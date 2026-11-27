@@ -124,9 +124,9 @@ manual actions are credited. `elapsed = max(0, now_unix - saved_at_unix)`;
 | TUI | insta goldens at 80×24, 100×30, 140×40; overlays; boot; mono/ASCII; keymap; too-small; terminal restore; E2E session; resize storm |
 | CI | fmt, clippy `-D warnings`, tests, pacing, MSRV, `cargo-deny`, release builds |
 
-Measured counts: core **208**, TUI **182**, sim **8**, and the release pacing test **1** — total
-**399**. `tools/test-floor.txt` currently reads `247`; the floor may only rise, and the infra
-worker raises it to the measured **399** (the gate refuses a count below the floor). Every new
+Measured counts: core **210**, TUI **229**, sim **8**, and the release pacing test **1** — total
+**448**. `tools/test-floor.txt` currently reads `448`; the floor may only rise, and the infra
+worker raises it to the measured **448** (the gate refuses a count below the floor). Every new
 mechanic gets a unit test; every save change gets a round-trip and a migration fixture;
 every UI change updates its goldens. Pacing is a release-mode integration test, not an
 `#[ignore]`d manual script. No tautologies or source-text assertions.
@@ -195,7 +195,7 @@ Reproduce with `cargo test -p hadal --release --bins measurement -- --nocapture`
 - Pacing bands in `docs/BALANCE.md` are met for `active`, `idle` and `offline`.
 - Manual playthrough: pulse → buy → tune → first Descent → hull → save → quit → relaunch →
   offline summary.
-- Goldens approved (34); no unverified claims in docs (CI verifies Ubuntu, Windows and macOS;
+- Goldens approved (37); no unverified claims in docs (CI verifies Ubuntu, Windows and macOS;
   release artifacts are not claimed until a tag is cut).
 - No `f64` state, no transcendental functions in simulation, no wall clock/RNG in core.
 
@@ -231,3 +231,32 @@ Reproduce with `cargo test -p hadal --release --bins measurement -- --nocapture`
 | Dev gate, checks, privacy, receipt, dist, mutate | `crates/xtask/src/main.rs` |
 | CI / release | `.github/workflows/` |
 | Installers | `scripts/` |
+
+## 14. Studio workflow
+
+The project runs as a studio of role passes, not a free-for-all of concurrent editors.
+
+- **One active agent at a time.** Exactly one agent edits the tree at any moment. Parallel
+  read-only scouting is allowed; concurrent writes are not.
+- **Sequential role passes with handoff artifacts.** Work proceeds
+  `Art/UX -> QA -> Systems -> QA -> CTO`. Each pass leaves a named handoff artifact (diff,
+  report, or snapshot set) that the next pass consumes; nothing is "carried in someone's head".
+- **Cross-model review.** Every artifact is reviewed by a **different model** than the one that
+  authored it. A model never signs off on its own work.
+- **Reviewer must be a different base model family.** A different reasoning mode/effort label
+  on the same weights is not a cross-model review. Record the reviewer's base model id, not the
+  harness label.
+- In this environment `studio:high` and `studio:off` are both the `[studio]` preset
+  (Qwen3.6-35B, 131072 ctx) and must not review each other. The designated cross-family
+  reviewer is `reviewer-20b` (gpt-oss-20b, 65536 ctx). QA passes that used `studio:off` are
+  same-base mechanical checks, not independent cross-model reviews.
+- **Model allocation.** Execution roles (Art/UX, Systems, content, QA, release engineering) run
+  local models. Deepseek is reserved for executive roles (Vision Guardian, Studio Operations,
+  CTO sign-off). The local reviewer of record for this setup is `reviewer-20b`; `studio:high`/
+  `studio:off` are the same base and are not reviewers.
+- **QA grades every handoff.** Each handoff is graded 1-100 against `docs/QA-RUBRIC.md` and must
+  pass the gate set: build, `fmt`, `clippy -D warnings`, tests, determinism, no placeholders, and
+  snapshot/performance proof where relevant. The score and per-gate pass/fail are recorded.
+- **Cross-model diff audit before any commit.** A reviewer with a different model audits the full
+  staged diff against this file before it is committed.
+- **No WIP commits.** `main` stays green; incomplete or unformatted work is never committed.
